@@ -1,0 +1,51 @@
+# Maintainer: here contributors <here@example.com>
+pkgname=here
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Universal package manager that speaks your system's language"
+arch=('x86_64' 'aarch64')
+url="https://github.com/your-repo/here"
+license=('MIT')
+depends=()
+makedepends=('zig>=0.12.1')
+optdepends=(
+    'flatpak: Flatpak package support'
+    'snapd: Snap package support'
+    'yay: AUR helper support'
+    'paru: AUR helper support'
+    'asdf-vm: Version manager support'
+    'mise: Version manager support'
+)
+provides=('here')
+conflicts=('here-git')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/your-repo/here/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    zig build -Doptimize=ReleaseFast
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    zig build test
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+
+    # Install binary
+    install -Dm755 "zig-out/bin/here" "$pkgdir/usr/bin/here"
+
+    # Install documentation
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 CHANGELOG.md "$pkgdir/usr/share/doc/$pkgname/CHANGELOG.md"
+
+    # Install license
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # Install man page (if it exists)
+    if [[ -f "here.1" ]]; then
+        install -Dm644 here.1 "$pkgdir/usr/share/man/man1/here.1"
+    fi
+}

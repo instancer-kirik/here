@@ -1,0 +1,33 @@
+# GitHub Sponsors funding configuration for here - Universal Package Manager
+
+# GitHub Sponsors
+# github: [your-username]
+
+# Open Collective
+# open_collective: here-package-manager
+
+# Ko-fi
+# ko_fi: here-dev
+
+# Tidelift
+# tidelift: npm/here
+
+# Community Bridge
+# community_bridge: here
+
+# Liberapay
+# liberapay: here-dev
+
+# IssueHunt
+# issuehunt: your-username/here
+
+# Otechie
+# otechie: your-username
+
+# LFX Crowdfunding
+# lfx_crowdfunding: here
+
+# Custom funding URLs
+custom:
+  - "https://etherscan.io/address/0xaf462cef9e8913a9cb7b6f0ba0ddf5d733eae57a"
+  - "https://basescan.org/address/0xaf462cef9e8913a9cb7b6f0ba0ddf5d733eae57a"
