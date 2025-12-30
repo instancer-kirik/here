@@ -49,39 +49,47 @@ here import my-system.json
 
 ## 📦 Installation
 
-### Quick Install
-
-#### One-liner Installation (Recommended)
+### Quick Install (Recommended)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-repo/here/main/install.sh | bash
+curl -fsSL https://instance.select/here | bash
 ```
 
-#### Package Managers
+That's it! Clean, simple, and works everywhere. No package manager needed.
+
+### Alternative Methods
+- **Manual binaries**: Download from [GitHub Releases](https://github.com/instancer-kirik/here/releases)
+- **AppImage**: Portable Linux binary that runs anywhere
+- **Build from source**: Requires Zig 0.15.0+
+
+See [INSTALL.md](./INSTALL.md) for detailed installation options.
+
+### Package Managers (Coming Soon)
 
 ##### Nix (Linux/macOS)
 ```bash
 # Install from flake
-nix profile install github:your-repo/here
+nix profile install github:instancer-kirik/here
 
 # Or run directly without installing
-nix run github:your-repo/here -- help
+nix run github:instancer-kirik/here -- help
 
 # Development environment
-nix develop github:your-repo/here
+nix develop github:instancer-kirik/here
 ```
 
 ##### Arch Linux (AUR)
 ```bash
-# Using yay
-yay -S here
+# Using yay (coming soon)
+yay -S here-bin
 
-# Using paru
-paru -S here
+# Using paru (coming soon)  
+paru -S here-bin
 ```
 
 ##### Homebrew (macOS)
 ```bash
-brew install your-repo/tap/here
+# Coming soon
+brew install here
 ```
 
 ### Pre-built Binaries

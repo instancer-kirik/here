@@ -6,12 +6,12 @@
 
 ### One-Line Installer (Linux/macOS)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/instancer-kirik/here/main/install.sh | bash
+curl -fsSL https://instance.select/here | bash
 ```
 
 Or with wget:
 ```bash
-wget -qO- https://raw.githubusercontent.com/instancer-kirik/here/main/install.sh | bash
+wget -qO- https://instance.select/here | bash
 ```
 
 This installer:
@@ -23,7 +23,7 @@ This installer:
 
 ### Custom Installation Directory
 ```bash
-curl -fsSL https://raw.githubusercontent.com/instancer-kirik/here/main/install.sh | bash -s -- --dir ~/.local/bin
+curl -fsSL https://instance.select/here | bash -s -- --dir ~/.local/bin
 ```
 
 ---
@@ -192,7 +192,7 @@ Expected output:
 
 ### Update via Install Script
 ```bash
-curl -fsSL https://raw.githubusercontent.com/instancer-kirik/here/main/install.sh | bash
+curl -fsSL https://instance.select/here | bash
 ```
 
 ### Manual Update
@@ -206,7 +206,7 @@ curl -fsSL https://raw.githubusercontent.com/instancer-kirik/here/main/install.s
 
 ### Quick Uninstall
 ```bash
-curl -fsSL https://raw.githubusercontent.com/instancer-kirik/here/main/install.sh | bash -s -- uninstall
+curl -fsSL https://instance.select/here | bash -s -- uninstall
 ```
 
 ### Manual Uninstall
@@ -221,7 +221,7 @@ sudo rm /usr/local/bin/here
 ### Permission Denied
 ```bash
 # If you get permission denied during installation:
-curl -fsSL https://raw.githubusercontent.com/instancer-kirik/here/main/install.sh | sudo bash
+curl -fsSL https://instance.select/here | sudo bash
 ```
 
 ### Binary Not Found After Install
@@ -259,6 +259,7 @@ sudo dnf install fuse
 
 **here** is designed to work when package managers are broken or missing:
 
+- **Clean domain**: `curl instance.select/here` - easy to remember
 - **Curl installer**: Works when `apt`/`pacman`/`dnf` are broken
 - **Static binaries**: No dependencies, work anywhere
 - **AppImage**: Portable, perfect for rescue USB drives

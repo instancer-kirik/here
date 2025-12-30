@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # here - Universal Package Manager Installation Script
-# https://github.com/your-repo/here
+# https://instance.select/here
 
 set -e
 
@@ -214,7 +214,7 @@ Examples:
     $0 --dir ~/.local/bin       # Install to custom directory
     $0 uninstall                # Uninstall here
 
-For more information, visit: https://github.com/$REPO
+For more information, visit: https://instance.select/here
 
 💖 Support development:
     ETH/Base: 0xaf462cef9e8913a9cb7b6f0ba0ddf5d733eae57a
