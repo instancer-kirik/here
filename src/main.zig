@@ -889,23 +889,25 @@ pub fn main() !void {
             print("\n", .{});
         }
 
-        // For yay/paru, do direct pass-through to preserve colors and full output
+        // For yay/paru, do complete pass-through (search + install) to preserve full functionality
         if (system_info.package_manager == .yay or system_info.package_manager == .paru) {
             print("\n", .{});
 
-            const cmd_parts = packages.buildCommand(allocator, system_info, .search, &[_][]const u8{converted_args[1]}) catch |err| {
-                print("❌ Failed to build search command: {}\n", .{err});
-                return;
-            };
-            defer allocator.free(cmd_parts);
+            // Build command for yay/paru without any flags - this gives the full interactive experience
+            var cmd_parts = ArrayList([]const u8){};
+            try cmd_parts.append(allocator, system_info.package_manager.toString());
+            try cmd_parts.append(allocator, converted_args[1]);
 
-            var child = std.process.Child.init(cmd_parts, allocator);
+            const final_cmd_parts = try cmd_parts.toOwnedSlice(allocator);
+            defer allocator.free(final_cmd_parts);
+
+            var child = std.process.Child.init(final_cmd_parts, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             child.stdin_behavior = .Inherit;
 
             _ = child.spawnAndWait() catch |err| {
-                print("❌ Search failed: {}\n", .{err});
+                print("❌ Command failed: {}\n", .{err});
                 return;
             };
         } else {
