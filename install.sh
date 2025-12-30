@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO="your-repo/here"
+REPO="instancer-kirik/here"
 INSTALL_DIR="/usr/local/bin"
 TMP_DIR="/tmp/here-install"
 
