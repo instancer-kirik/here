@@ -1,0 +1,65 @@
+{
+  "theme": "technical",
+  "hero_title": "$ here install anything",
+  "hero_subtitle": "Universal package manager that speaks every system's language. One tool to rule them all: native packages, Flatpak, AppImage, Nix, and version managers.",
+  "hero_image": "https://images.unsplash.com/photo-1629654297299-c8506221ca97?w=1920&h=1080&fit=crop",
+  "call_to_action": "Install here",
+  "cta_link": "https://github.com/instancer-kirik/here#installation",
+  "sections": [
+    {
+      "id": "quickstart",
+      "type": "text",
+      "title": "> Quick Start",
+      "content": "<pre><code># Install here\ncurl -fsSL https://raw.githubusercontent.com/instancer-kirik/here/main/install.sh | bash\n\n# Use anywhere\nhere install firefox        # Finds best source automatically\nhere search python         # Cross-platform search\nhere update                 # Update everything\n\n# System migration\nhere export my-system.json  # Backup your setup\nhere import my-system.json  # Restore on new machine</code></pre><p>Zero configuration. Works on <strong>any Linux distro + macOS</strong>. Start using in <strong>30 seconds</strong>.</p>",
+      "order": 1,
+      "visible": true
+    },
+    {
+      "id": "features",
+      "type": "features",
+      "title": "// Core Features",
+      "order": 2,
+      "visible": true
+    },
+    {
+      "id": "system-support",
+      "type": "text",
+      "title": "⚡ Universal Compatibility",
+      "content": "<div class='system-grid'><div class='system'><h4>📦 Package Managers</h4><ul><li>pacman (Arch/Manjaro)</li><li>apt (Ubuntu/Debian)</li><li>dnf (Fedora/RHEL)</li><li>zypper (openSUSE)</li><li>nix (NixOS/any)</li><li>brew (macOS/Linux)</li><li>yay/paru (AUR)</li></ul></div><div class='system'><h4>🧊 App Formats</h4><ul><li>Native packages</li><li>Flatpak</li><li>Snap</li><li>AppImage (2500+ apps)</li><li>Nix packages</li><li>Direct downloads</li></ul></div><div class='system'><h4>🔧 Version Managers</h4><ul><li>asdf • mise</li><li>rustup • cargo</li><li>npm • yarn • bun</li><li>pyenv • pip</li><li>rbenv • gem</li><li>zigup</li></ul></div></div>",
+      "order": 3,
+      "visible": true
+    },
+    {
+      "id": "migration-tools",
+      "type": "text",
+      "title": "🏠 Complete System Migration",
+      "content": "<p>Beyond package management - <code>here</code> includes enterprise-grade desktop migration tools:</p><pre><code># Complete system backup\n./migrate-system.sh\n\n# Desktop environment backup\n./backup-desktop-state.sh\n\n# Theme and customization backup\n./backup-cachyos-themes.sh</code></pre><div class='migration-features'><div class='feature'><h4>📁 Dotfiles & Configs</h4><p>Backup shell configs, editor settings, SSH keys, Git config</p></div><div class='feature'><h4>🎨 Themes & Appearance</h4><p>GTK themes, icon themes, wallpapers, fonts, cursor themes</p></div><div class='feature'><h4>🖥️ Desktop Environments</h4><p>GNOME, KDE, XFCE, Cinnamon, Awesome WM settings</p></div><div class='feature'><h4>🔄 One-Command Restore</h4><p>Portable migration packages with automatic restore scripts</p></div></div>",
+      "order": 4,
+      "visible": true
+    },
+    {
+      "id": "stats",
+      "type": "text",
+      "title": "📊 By the Numbers",
+      "content": "<div class='stats-grid'><div class='stat'><h3>2500+</h3><p>AppImage apps via AppMan integration</p></div><div class='stat'><h3>10+</h3><p>Package managers supported</p></div><div class='stat'><h3>12+</h3><p>Version managers integrated</p></div><div class='stat'><h3>< 50ms</h3><p>Average command execution</p></div><div class='stat'><h3>385</h3><p>Packages in test profile (real system)</p></div><div class='stat'><h3>1.0.0</h3><p>Production ready</p></div></div>",
+      "order": 5,
+      "visible": true
+    }
+  ],
+  "social_links": [
+    {
+      "platform": "github",
+      "url": "https://github.com/instancer-kirik/here",
+      "label": "View Source"
+    },
+    {
+      "platform": "website",
+      "url": "https://github.com/instancer-kirik/here/releases",
+      "label": "Download"
+    }
+  ],
+  "background_color": "#0a0a0a",
+  "text_color": "#e5e5e5",
+  "accent_color": "#00d4aa",
+  "custom_css": ".system-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; margin: 2rem 0; } .system { background: rgba(0, 212, 170, 0.05); border: 1px solid rgba(0, 212, 170, 0.2); border-radius: 12px; padding: 1.5rem; } .system h4 { color: #00d4aa; font-family: 'JetBrains Mono', monospace; margin-bottom: 1rem; font-size: 1.1rem; } .system ul { list-style: none; padding: 0; } .system li { padding: 0.3rem 0; color: #b5b5b5; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; } .system li::before { content: '▶ '; color: #00d4aa; margin-right: 0.5rem; } .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1.5rem; margin: 2rem 0; } .stat { text-align: center; background: rgba(0, 212, 170, 0.05); border: 1px solid rgba(0, 212, 170, 0.2); border-radius: 8px; padding: 1.5rem 1rem; transition: all 0.3s ease; } .stat:hover { border-color: #00d4aa; box-shadow: 0 8px 25px rgba(0, 212, 170, 0.15); transform: translateY(-2px); } .stat h3 { color: #00d4aa; font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; margin-bottom: 0.5rem; font-weight: bold; } .stat p { color: #b5b5b5; font-size: 0.85rem; margin: 0; } .migration-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin: 2rem 0; } .feature { background: rgba(0, 212, 170, 0.03); border-left: 3px solid #00d4aa; padding: 1rem 1.5rem; border-radius: 0 8px 8px 0; } .feature h4 { color: #00d4aa; font-family: 'JetBrains Mono', monospace; margin-bottom: 0.5rem; font-size: 1rem; } .feature p { color: #b5b5b5; font-size: 0.9rem; margin: 0; line-height: 1.5; } .hero-title { font-family: 'JetBrains Mono', monospace; text-shadow: 0 0 20px rgba(0, 212, 170, 0.3); background: linear-gradient(135deg, #00d4aa 0%, #00f5cc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; } .cta-button { background: linear-gradient(135deg, #00d4aa 0%, #00f5cc 100%); color: #0a0a0a; font-weight: bold; transition: all 0.3s ease; font-family: 'JetBrains Mono', monospace; } .cta-button:hover { box-shadow: 0 10px 25px rgba(0, 212, 170, 0.4); transform: translateY(-3px); } pre code { background: #111111; border: 1px solid rgba(0, 212, 170, 0.2); border-radius: 8px; padding: 1.5rem; font-size: 0.85rem; line-height: 1.6; overflow-x: auto; } code { color: #00d4aa; font-family: 'JetBrains Mono', monospace; } body { background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%); } .section-title { font-family: 'JetBrains Mono', monospace; color: #00d4aa; } h1, h2, h3, h4, h5, h6 { font-family: 'JetBrains Mono', monospace; } @media (max-width: 768px) { .system-grid, .stats-grid, .migration-features { grid-template-columns: 1fr; } .stat h3 { font-size: 1.5rem; } }"
+}
