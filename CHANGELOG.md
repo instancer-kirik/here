@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Planned: Improved error messages and user feedback
 
+## [1.1.0] - 2025-12-30
+
+### Added
+- **DNF package manager support** - Full integration with Fedora's DNF package manager
+- **Enhanced yay/paru pass-through** - Complete pass-through for yay/paru commands preserving interactive experience
+- **Intelligent query handling** - `here <query>` now works like `yay <query>` or `apt search <query>`
+- **Improved fallback search** - Better detection of search queries vs unknown commands
+
+### Changed
+- **Yay/paru behavior** - Now preserves full interactive search + install flow instead of separate commands
+- **Command parsing** - Unknown commands are intelligently treated as search queries
+- **Error handling** - Reduced "error installing repo packages" issues with direct pass-through
+
+### Fixed
+- **Installation flow** - Fixed issues where yay search wouldn't lead to proper installation
+- **Command execution** - Better stdin/stdout/stderr handling for interactive package managers
+
 ## [1.0.0] - 2025-01-20
 
 ### Added
