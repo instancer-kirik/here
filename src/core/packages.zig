@@ -327,6 +327,61 @@ pub fn installPackagesBatch(allocator: Allocator, filename: []const u8, install_
     print("📊 Summary: {} installed, {} failed\n", .{ installed_count, failed_count });
 }
 
+pub fn unlockPackageManager(allocator: Allocator, system_info: SystemInfo) !void {
+    print("🔓 Unlocking package manager for {s}...\n", .{system_info.distro.toString()});
+
+    const lock_files = switch (system_info.package_manager) {
+        .pacman, .yay, .paru => &[_][]const u8{"/var/lib/pacman/db.lck"},
+        .apt => &[_][]const u8{
+            "/var/lib/dpkg/lock",
+            "/var/lib/dpkg/lock-frontend",
+            "/var/lib/apt/lists/lock",
+        },
+        .dnf => &[_][]const u8{"/var/run/dnf.pid"},
+        else => {
+            print("⚠️  No known lock files for {s}\n", .{system_info.package_manager.toString()});
+            return;
+        },
+    };
+
+    var found_any = false;
+    for (lock_files) |lock_file| {
+        // Check if file exists
+        std.fs.accessAbsolute(lock_file, .{}) catch {
+            continue;
+        };
+
+        found_any = true;
+        print("🔍 Found lock file: {s}\n", .{lock_file});
+        print("🚀 Removing: sudo rm {s}\n", .{lock_file});
+
+        const result = std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &[_][]const u8{ "sudo", "rm", lock_file },
+        }) catch |err| {
+            print("❌ Failed to run rm command: {}\n", .{err});
+            continue;
+        };
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+
+        if (result.term.Exited == 0) {
+            print("✅ Successfully removed {s}\n", .{lock_file});
+        } else {
+            print("❌ Failed to remove {s} (exit code: {})\n", .{ lock_file, result.term.Exited });
+            if (result.stderr.len > 0) {
+                print("   Error: {s}", .{result.stderr});
+            }
+        }
+    }
+
+    if (!found_any) {
+        print("✅ No lock files found. System is already unlocked!\n", .{});
+    } else {
+        print("\n✨ Unlock operation complete.\n", .{});
+    }
+}
+
 pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, search_term: []const u8) !void {
     print("\n", .{});
 

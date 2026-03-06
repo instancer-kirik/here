@@ -970,7 +970,7 @@ pub fn main() !void {
     // Get packages from remaining args
     const package_args = if (converted_args.len > 2) converted_args[2..] else &[_][]const u8{};
 
-    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and package_args.len == 0) {
+    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and package_args.len == 0) {
         print("❌ No packages specified\n", .{});
         return;
     }
@@ -1122,6 +1122,13 @@ pub fn main() !void {
             print("Available options:\n", .{});
             print("  here config recovery  - Configure recovery system\n", .{});
         }
+        return;
+    }
+
+    if (command == .unlock) {
+        packages.unlockPackageManager(allocator, system_info) catch |err| {
+            print("❌ Unlock command failed: {}\n", .{err});
+        };
         return;
     }
 
