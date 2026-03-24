@@ -1,9 +1,9 @@
 const std = @import("std");
 const print = std.debug.print;
 
-pub const Command = enum { install, search, remove, update, list, info, help, version, @"export", import, backup, recover, config, unlock, fallback_search };
+pub const Command = enum { install, search, remove, update, list, info, help, version, @"export", import, backup, recover, config, unlock, prunable, standalone, unused, sweep, fallback_search };
 
-pub fn parseCommand(args: []const []const u8) ?Command {
+pub fn parseCommand(args: []const []const u8) ? Command {
     if (args.len < 2) return null;
 
     const cmd = args[1];
@@ -21,6 +21,9 @@ pub fn parseCommand(args: []const []const u8) ?Command {
     if (std.mem.eql(u8, cmd, "recover")) return .recover;
     if (std.mem.eql(u8, cmd, "config")) return .config;
     if (std.mem.eql(u8, cmd, "unlock")) return .unlock;
+    if (std.mem.eql(u8, cmd, "prunable") or std.mem.eql(u8, cmd, "unused")) return .prunable;
+    if (std.mem.eql(u8, cmd, "standalone")) return .standalone;
+    if (std.mem.eql(u8, cmd, "sweep") or std.mem.eql(u8, cmd, "prune")) return .sweep;
 
     // If no known command matches, treat it as a search query (like yay does)
     return .fallback_search;
@@ -47,6 +50,9 @@ pub fn showHelp() void {
     print("                      Use --docker, --podman, --postgresql for specific services\n", .{});
     print("  config recovery     Configure recovery system settings\n", .{});
     print("  unlock             Unlock package manager by removing stale lock files\n", .{});
+    print("  standalone          List packages you installed intentionally (top-level)\n", .{});
+    print("  unused, prunable    List unneeded dependencies (orphans)\n", .{});
+    print("  sweep, prune        Interactive flow to remove unused packages\n", .{});
     print("  version             Show version information\n", .{});
     print("  help                Show this help\n\n", .{});
     print("Examples:\n", .{});

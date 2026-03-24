@@ -798,34 +798,7 @@ fn printVersion() void {
     print("For more information: https://github.com/instance-select/here\n", .{});
 }
 
-fn printHelp() void {
-    print("🏠 here - {s}\n\n", .{build_options.description});
-    print("Usage: here <command> [packages...]\n\n", .{});
-    print("Commands:\n", .{});
-    print("  install <packages>   Install packages\n", .{});
-    print("  search <term>        Search for packages\n", .{});
-    print("  remove <packages>    Remove packages\n", .{});
-    print("  update              Update all packages\n", .{});
-    print("  list                List installed packages\n", .{});
-    print("  info <package>      Show package information\n", .{});
-    print("  export [file]       Create package export profile for migration\n", .{});
-    print("                      Use --include-config to include dotfiles and configs\n", .{});
-    print("  import <file>       Import and install packages from profile\n", .{});
-    print("  backup <source>     Smart file backup for migration\n", .{});
-    print("  version             Show version information\n", .{});
-    print("  help                Show this help\n\n", .{});
-    print("Examples:\n", .{});
-    print("  here install firefox\n", .{});
-    print("  here search python\n", .{});
-    print("  here remove bloatware\n", .{});
-    print("  here update\n", .{});
-    print("  here export my-setup.json\n", .{});
-    print("  here export --include-config my-full-setup.json\n", .{});
-    print("  here import my-setup.json\n", .{});
-    print("  here backup ~ -d /mnt/backup/home\n\n", .{});
-    print("💖 Support development: 0xaf462cef9e8913a9cb7b6f0ba0ddf5d733eae57a (ETH/Base)\n", .{});
-    print("For more information, visit: https://github.com/instance-select/here\n", .{});
-}
+// Use cli.showHelp() instead of local printHelp()
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -839,7 +812,7 @@ pub fn main() !void {
     const converted_args = args;
 
     if (args.len < 2) {
-        printHelp();
+        cli.showHelp();
         return;
     }
 
@@ -970,7 +943,7 @@ pub fn main() !void {
     // Get packages from remaining args
     const package_args = if (converted_args.len > 2) converted_args[2..] else &[_][]const u8{};
 
-    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and package_args.len == 0) {
+    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and command != .prunable and command != .standalone and command != .sweep and package_args.len == 0) {
         print("❌ No packages specified\n", .{});
         return;
     }
@@ -1354,7 +1327,42 @@ pub fn main() !void {
         return;
     }
 
+    // Handle prunable and standalone commands with "better wording" headers
+    if (command == .prunable or command == .standalone) {
+        if (system_info.package_manager != .unknown) {
+            const cmd_parts = packages.buildCommand(allocator, system_info, command, package_args) catch |err| {
+                print("❌ Failed to build command: {}\n", .{err});
+                return;
+            };
+            defer allocator.free(cmd_parts);
+
+            if (command == .prunable) {
+                print("\n🧹 Prunable packages (unneeded dependencies):\n", .{});
+                print("============================================\n", .{});
+            } else {
+                print("\n📦 Standalone packages (top-level):\n", .{});
+                print("==================================\n", .{});
+            }
+
+            var child = std.process.Child.init(cmd_parts, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = child.spawnAndWait() catch {};
+            print("\n", .{});
+        } else {
+            print("❌ No supported package manager found for this operation\n", .{});
+        }
+        return;
+    }
+
     // Handle list command with AppImage support
+    if (command == .sweep) {
+        packages.performPruneFlow(allocator, system_info) catch |err| {
+            print("❌ Sweep command failed: {}\n", .{err});
+        };
+        return;
+    }
+
     if (command == .list) {
         // Show native packages first
         if (system_info.package_manager != .unknown) {

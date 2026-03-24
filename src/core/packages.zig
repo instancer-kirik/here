@@ -73,6 +73,8 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                 },
                 .list => try cmd_parts.append(allocator, "-Q"),
                 .info => try cmd_parts.append(allocator, "-Si"),
+                .prunable => try cmd_parts.append(allocator, "-Qdt"),
+                .standalone => try cmd_parts.append(allocator, "-Qt"),
                 else => return error.UnsupportedCommand,
             }
         },
@@ -95,6 +97,8 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                 },
                 .list => try cmd_parts.append(allocator, "-Q"),
                 .info => try cmd_parts.append(allocator, "-Si"),
+                .prunable => try cmd_parts.append(allocator, "-Qdt"),
+                .standalone => try cmd_parts.append(allocator, "-Qt"),
                 else => return error.UnsupportedCommand,
             }
         },
@@ -111,9 +115,21 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                     try cmd_parts.append(allocator, "remove");
                     try cmd_parts.append(allocator, "-y");
                 },
-                .update => try cmd_parts.append(allocator, "update && sudo apt upgrade -y"),
+                .update => {
+                    try cmd_parts.append(allocator, "update");
+                },
                 .list => try cmd_parts.append(allocator, "list --installed"),
                 .info => try cmd_parts.append(allocator, "show"),
+                .prunable => {
+                    cmd_parts.clearRetainingCapacity();
+                    try cmd_parts.append(allocator, "apt-mark");
+                    try cmd_parts.append(allocator, "showauto");
+                },
+                .standalone => {
+                    cmd_parts.clearRetainingCapacity();
+                    try cmd_parts.append(allocator, "apt-mark");
+                    try cmd_parts.append(allocator, "showmanual");
+                },
                 else => return error.UnsupportedCommand,
             }
         },
@@ -136,6 +152,14 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                 },
                 .list => try cmd_parts.append(allocator, "search --installed-only"),
                 .info => try cmd_parts.append(allocator, "info"),
+                .prunable => {
+                    try cmd_parts.append(allocator, "packages");
+                    try cmd_parts.append(allocator, "--unneeded");
+                },
+                .standalone => {
+                    try cmd_parts.append(allocator, "packages");
+                    try cmd_parts.append(allocator, "--orphaned");
+                },
                 else => return error.UnsupportedCommand,
             }
         },
@@ -158,6 +182,18 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                 },
                 .list => try cmd_parts.append(allocator, "list installed"),
                 .info => try cmd_parts.append(allocator, "info"),
+                .prunable => {
+                    cmd_parts.clearRetainingCapacity();
+                    try cmd_parts.append(allocator, "dnf");
+                    try cmd_parts.append(allocator, "repoquery");
+                    try cmd_parts.append(allocator, "--unneeded");
+                },
+                .standalone => {
+                    cmd_parts.clearRetainingCapacity();
+                    try cmd_parts.append(allocator, "dnf");
+                    try cmd_parts.append(allocator, "repoquery");
+                    try cmd_parts.append(allocator, "--userinstalled");
+                },
                 else => return error.UnsupportedCommand,
             }
         },
@@ -631,4 +667,195 @@ fn parseIndices(allocator: Allocator, input: []const u8, max_packages: usize) !A
     }
 
     return indices;
+}
+pub const PrunablePackage = struct {
+    name: []const u8,
+    version: []const u8,
+    description: []const u8,
+    repository: []const u8,
+    optional_for: []const u8,
+
+    pub fn deinit(self: @This(), allocator: Allocator) void {
+        allocator.free(self.name);
+        if (self.version.len > 0) allocator.free(self.version);
+        if (self.description.len > 0) allocator.free(self.description);
+        if (self.repository.len > 0) allocator.free(self.repository);
+        if (self.optional_for.len > 0) allocator.free(self.optional_for);
+    }
+};
+
+pub fn getPrunablePackages(allocator: Allocator, system_info: SystemInfo) !ArrayList(PrunablePackage) {
+    var cmd_parts = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer cmd_parts.deinit(allocator);
+
+    // Build the command specific to the package manager and request details if possible
+    switch (system_info.package_manager) {
+        .yay, .paru, .pacman => {
+            try cmd_parts.append(allocator, system_info.package_manager.toString());
+            try cmd_parts.append(allocator, "-Qdti");
+        },
+        .zypper => {
+            try cmd_parts.append(allocator, "sudo");
+            try cmd_parts.append(allocator, "zypper");
+            try cmd_parts.append(allocator, "packages");
+            try cmd_parts.append(allocator, "--unneeded");
+        },
+        .apt => {
+            try cmd_parts.append(allocator, "apt-mark");
+            try cmd_parts.append(allocator, "showauto");
+        },
+        else => {
+            const basic_parts = try buildCommand(allocator, system_info, .prunable, &[_][]const u8{});
+            for (basic_parts) |part| try cmd_parts.append(allocator, part);
+            allocator.free(basic_parts);
+        }
+    }
+
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = cmd_parts.items,
+        .max_output_bytes = 10 * 1024 * 1024,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    var packages = ArrayList(PrunablePackage){ .items = &[_]PrunablePackage{}, .capacity = 0 };
+    if (result.term.Exited != 0) return packages;
+
+    if (system_info.package_manager == .yay or system_info.package_manager == .paru or system_info.package_manager == .pacman) {
+        // Parse pacman -Qdti output
+        var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+        var current_pkg = PrunablePackage{ .name = "", .version = "", .description = "", .repository = "", .optional_for = "" };
+        var has_current = false;
+
+        while (lines.next()) |raw_line| {
+            const trimmed = std.mem.trim(u8, raw_line, " \t\r\n");
+            if (trimmed.len == 0) {
+                if (has_current) {
+                    try packages.append(allocator, current_pkg);
+                    current_pkg = PrunablePackage{ .name = "", .version = "", .description = "", .repository = "", .optional_for = "" };
+                    has_current = false;
+                }
+                continue;
+            }
+
+            if (std.mem.indexOf(u8, trimmed, ":")) |colon_idx| {
+                const key = std.mem.trim(u8, trimmed[0..colon_idx], " ");
+                const value = std.mem.trim(u8, trimmed[colon_idx + 1 ..], " ");
+
+                if (std.mem.eql(u8, key, "Name")) {
+                    current_pkg.name = try allocator.dupe(u8, value);
+                    has_current = true;
+                } else if (std.mem.eql(u8, key, "Version")) {
+                    current_pkg.version = try allocator.dupe(u8, value);
+                } else if (std.mem.eql(u8, key, "Description")) {
+                    current_pkg.description = try allocator.dupe(u8, value);
+                } else if (std.mem.eql(u8, key, "Installed From") or std.mem.eql(u8, key, "Repository")) {
+                    current_pkg.repository = try std.fmt.allocPrint(allocator, "[{s}]", .{value});
+                } else if (std.mem.eql(u8, key, "Optional For")) {
+                    if (!std.mem.eql(u8, value, "None")) {
+                        current_pkg.optional_for = try allocator.dupe(u8, value);
+                    }
+                }
+            }
+        }
+        if (has_current) {
+            try packages.append(allocator, current_pkg);
+        }
+    } else {
+        // Fallback for other package managers
+        var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t\r\n");
+            if (trimmed.len == 0) continue;
+            if (std.mem.eql(u8, system_info.package_manager.toString(), "apt") and std.mem.startsWith(u8, trimmed, "Listing...")) continue;
+
+            const pkg_name = switch (system_info.package_manager) {
+                .apt => blk: {
+                    if (std.mem.indexOf(u8, trimmed, "/")) |idx| break :blk trimmed[0..idx];
+                    break :blk trimmed;
+                },
+                .zypper => blk: {
+                    var parts = std.mem.splitScalar(u8, trimmed, '|');
+                    _ = parts.next() orelse break :blk trimmed;
+                    const zypper_name = parts.next() orelse break :blk trimmed;
+                    break :blk std.mem.trim(u8, zypper_name, " ");
+                },
+                else => trimmed,
+            };
+
+            // Avoid common header lines in zypper
+            if (std.mem.eql(u8, pkg_name, "Name") or std.mem.eql(u8, pkg_name, "---") or std.mem.eql(u8, pkg_name, "S")) continue;
+
+            if (pkg_name.len > 0) {
+                try packages.append(allocator, PrunablePackage{
+                    .name = try allocator.dupe(u8, pkg_name),
+                    .version = try allocator.dupe(u8, ""),
+                    .description = try allocator.dupe(u8, ""),
+                    .repository = try allocator.dupe(u8, ""),
+                    .optional_for = try allocator.dupe(u8, ""),
+                });
+            }
+        }
+    }
+
+    return packages;
+}
+
+pub fn performPruneFlow(allocator: Allocator, system_info: SystemInfo) !void {
+    print("🔍 Identifying unused packages...\n", .{});
+    var prunable = try getPrunablePackages(allocator, system_info);
+    defer {
+        for (prunable.items) |pkg| pkg.deinit(allocator);
+        prunable.deinit(allocator);
+    }
+
+    if (prunable.items.len == 0) {
+        print("✅ No unused packages found. Your system is already lean!\n", .{});
+        return;
+    }
+
+    print("\n🧹 Found {} unused packages:\n", .{prunable.items.len});
+    for (prunable.items) |pkg| {
+        if (pkg.description.len > 0 and pkg.repository.len > 0) {
+            print("\n  • \x1b[1m{s}\x1b[0m {s} \x1b[38;5;242m{s}\x1b[0m\n      └─ {s}\n", .{pkg.name, pkg.repository, pkg.version, pkg.description});
+        } else if (pkg.description.len > 0) {
+            print("\n  • \x1b[1m{s}\x1b[0m \x1b[38;5;242m{s}\x1b[0m\n      └─ {s}\n", .{pkg.name, pkg.version, pkg.description});
+        } else {
+            print("  • \x1b[1m{s}\x1b[0m\n", .{pkg.name});
+        }
+
+        if (pkg.optional_for.len > 0) {
+            print("      💡 \x1b[33mOptional requirement for:\x1b[0m {s}\n", .{pkg.optional_for});
+        }
+    }
+
+    print("\n🤔 Prune these packages? [y/N]: ", .{});
+    var buf: [256]u8 = undefined;
+    const stdin = std.fs.File.stdin();
+    const bytes_read = try stdin.read(buf[0..]);
+    if (bytes_read > 0) {
+        const input = std.mem.trim(u8, buf[0..bytes_read], " \t\r\n");
+        if (input.len > 0 and (input[0] == 'y' or input[0] == 'Y')) {
+            print("🚀 Pruning packages...\n", .{});
+            
+            var names = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+            defer names.deinit(allocator);
+            for (prunable.items) |pkg| {
+                try names.append(allocator, pkg.name);
+            }
+
+            const cmd_parts = try buildCommand(allocator, system_info, .remove, names.items);
+            defer allocator.free(cmd_parts);
+
+            var child = std.process.Child.init(cmd_parts, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = try child.spawnAndWait();
+            
+            print("\n✅ System cleaned successfully!\n", .{});
+        } else {
+            print("⏹️  Prune cancelled.\n", .{});
+        }
+    }
 }
