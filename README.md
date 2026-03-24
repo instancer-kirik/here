@@ -25,7 +25,8 @@
 ```bash
 # Install a package
 here install firefox
-
+here obs
+(works like yay obs; *TODO: test other distros*)
 # Search for packages
 here search python
 
@@ -53,6 +54,8 @@ here import my-system.json
 ```bash
 curl -fsSL https://instance.select/here | bash
 ```
+Lmk if this doesn't work... 
+built with 0.15.2 zig on asdf
 
 That's it! Clean, simple, and works everywhere. No package manager needed.
 
