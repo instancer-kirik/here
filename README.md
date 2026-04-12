@@ -57,7 +57,7 @@ curl -fsSL https://instance.select/here | bash
 That's it! Clean, simple, and works everywhere. No package manager needed.
 
 ### Alternative Methods
-- **Manual binaries**: Download from [GitHub Releases](https://github.com/instancer-kirik/here/releases)
+- **Manual binaries**: Download from [Codeberg Releases](https://codeberg.org/OverHereEnterprise/here/releases)
 - **AppImage**: Portable Linux binary that runs anywhere
 - **Build from source**: Requires Zig 0.15.0+
 
@@ -68,13 +68,13 @@ See [INSTALL.md](./INSTALL.md) for detailed installation options.
 ##### Nix (Linux/macOS)
 ```bash
 # Install from flake
-nix profile install github:instancer-kirik/here
+nix profile install git+https://codeberg.org/OverHereEnterprise/here
 
 # Or run directly without installing
-nix run github:instancer-kirik/here -- help
+nix run git+https://codeberg.org/OverHereEnterprise/here -- help
 
 # Development environment
-nix develop github:instancer-kirik/here
+nix develop git+https://codeberg.org/OverHereEnterprise/here
 ```
 
 ##### Arch Linux (AUR)
@@ -98,28 +98,28 @@ Download the latest release for your platform from the [releases page](releases)
 
 #### Linux (x86_64)
 ```bash
-curl -L https://github.com/your-repo/here/releases/latest/download/here-linux-x86_64 -o here
+curl -L https://codeberg.org/OverHereEnterprise/here/releases/latest/download/here-linux-x86_64 -o here
 chmod +x here
 sudo mv here /usr/local/bin/
 ```
 
 #### Linux (aarch64)
 ```bash
-curl -L https://github.com/your-repo/here/releases/latest/download/here-linux-aarch64 -o here
+curl -L https://codeberg.org/OverHereEnterprise/here/releases/latest/download/here-linux-aarch64 -o here
 chmod +x here
 sudo mv here /usr/local/bin/
 ```
 
 #### macOS (Intel)
 ```bash
-curl -L https://github.com/your-repo/here/releases/latest/download/here-macos-x86_64 -o here
+curl -L https://codeberg.org/OverHereEnterprise/here/releases/latest/download/here-macos-x86_64 -o here
 chmod +x here
 sudo mv here /usr/local/bin/
 ```
 
 #### macOS (Apple Silicon)
 ```bash
-curl -L https://github.com/your-repo/here/releases/latest/download/here-macos-aarch64 -o here
+curl -L https://codeberg.org/OverHereEnterprise/here/releases/latest/download/here-macos-aarch64 -o here
 chmod +x here
 sudo mv here /usr/local/bin/
 ```
@@ -130,7 +130,7 @@ Requirements:
 - [Zig](https://ziglang.org/) 0.12.1 or later
 
 ```bash
-git clone https://github.com/your-repo/here.git
+git clone https://codeberg.org/OverHereEnterprise/here.git
 cd here
 zig build -Doptimize=ReleaseFast
 sudo cp zig-out/bin/here /usr/local/bin/
@@ -548,7 +548,7 @@ We welcome contributions! Here's how to help:
 
 #### With Nix (Recommended)
 ```bash
-git clone https://github.com/your-repo/here.git
+git clone https://codeberg.org/OverHereEnterprise/here.git
 cd here
 
 # Enter development shell
@@ -561,7 +561,7 @@ direnv allow
 
 #### Manual Setup
 ```bash
-git clone https://github.com/your-repo/here.git
+git clone https://codeberg.org/OverHereEnterprise/here.git
 cd here
 
 # Install Zig 0.12.1+

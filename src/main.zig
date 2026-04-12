@@ -795,7 +795,7 @@ fn printVersion() void {
     print("💖 Support development:\n", .{});
     print("   here project: 0xaf462cef9e8913a9cb7b6f0ba0ddf5d733eae57a (ETH/Base)\n", .{});
     print("   AppMan project: ko-fi.com/IvanAlexHC | PayPal.me/IvanAlexHC\n", .{});
-    print("For more information: https://github.com/instance-select/here\n", .{});
+    print("For more information: https://codeberg.org/OverHereEnterprise/here\n", .{});
 }
 
 // Use cli.showHelp() instead of local printHelp()
@@ -1441,6 +1441,82 @@ pub fn main() !void {
                 print("✅ Command completed successfully\n", .{});
             } else {
                 print("❌ Command failed with exit code: {}\n", .{code});
+                if (command == .install) {
+                    print("\n⚠️  Installation failed. Would you like to run a Smart Diagnostic? [y/N]: ", .{});
+                    var buf: [256]u8 = undefined;
+                    const stdin = std.fs.File.stdin();
+                    const bytes_read = stdin.read(buf[0..]) catch 0;
+                    if (bytes_read > 0) {
+                        const input = std.mem.trim(u8, buf[0..bytes_read], " \t\r\n");
+                        if (input.len > 0 and (input[0] == 'y' or input[0] == 'Y')) {
+                            print("\n🔍 Analyzing failure (this will rerun the process silently, please wait)...\n", .{});
+                            const smart_recovery = @import("core/recovery.zig");
+
+                            var diag_child = std.process.Child.init(cmd_parts, allocator);
+                            diag_child.stdout_behavior = .Pipe;
+                            diag_child.stderr_behavior = .Pipe;
+
+                            var stdout_buf = std.ArrayList(u8).init(allocator);
+                            var stderr_buf = std.ArrayList(u8).init(allocator);
+                            defer stdout_buf.deinit();
+                            defer stderr_buf.deinit();
+
+                            diag_child.spawn() catch {};
+                            diag_child.collectOutput(&stdout_buf, &stderr_buf, 10 * 1024 * 1024) catch {};
+                            _ = diag_child.wait() catch {};
+
+                            const action_opt = smart_recovery.analyzeFailure(allocator, system_info, stdout_buf.items, stderr_buf.items) catch null;
+                            if (action_opt) |action| {
+                                defer action.deinit(allocator);
+                                print("\n✨ Smart Diagnosis Complete!\n", .{});
+                                print("💡 {s}\n", .{action.message});
+
+                                if (action.action_type == .skip_checksums) {
+                                    print("\n🔧 Apply fix automatically? [y/N]: ", .{});
+                                    const fix_bytes = stdin.read(buf[0..]) catch 0;
+                                    const fix_input = std.mem.trim(u8, buf[0..fix_bytes], " \t\r\n");
+                                    if (fix_input.len > 0 and (fix_input[0] == 'y' or fix_input[0] == 'Y')) {
+                                        var fixed_cmd = std.ArrayList([]const u8).init(allocator);
+                                        defer fixed_cmd.deinit();
+
+                                        for (cmd_parts) |part| {
+                                            fixed_cmd.append(part) catch continue;
+                                            if (std.mem.eql(u8, part, "-S") or std.mem.eql(u8, part, "install")) {
+                                                fixed_cmd.append("--mflags") catch continue;
+                                                fixed_cmd.append("--skipchecksums") catch continue;
+                                            }
+                                        }
+
+                                        print("\n🚀 Rerunning with skipped checksums...\n", .{});
+                                        var fixed_child = std.process.Child.init(fixed_cmd.items, allocator);
+                                        _ = fixed_child.spawnAndWait() catch {};
+                                    }
+                                } else if (action.action_type == .install_dependencies) {
+                                    print("\n📦 Missing dependencies: ", .{});
+                                    for (action.packages_to_install) |dep| print("{s} ", .{dep});
+                                    print("\n\n🔧 Install them now? [y/N]: ", .{});
+
+                                    const fix_bytes = stdin.read(buf[0..]) catch 0;
+                                    const fix_input = std.mem.trim(u8, buf[0..fix_bytes], " \t\r\n");
+                                    if (fix_input.len > 0 and (fix_input[0] == 'y' or fix_input[0] == 'Y')) {
+                                        const dep_cmd = packages.buildCommand(allocator, system_info, .install, action.packages_to_install) catch return;
+                                        defer allocator.free(dep_cmd);
+
+                                        print("\n🚀 Installing dependencies...\n", .{});
+                                        var dep_child = std.process.Child.init(dep_cmd, allocator);
+                                        const dep_term = dep_child.spawnAndWait() catch return;
+
+                                        if (dep_term == .Exited and dep_term.Exited == 0) {
+                                            print("\n✅ Dependencies installed! Run your original install command again.\n", .{});
+                                        }
+                                    }
+                                }
+                            } else {
+                                print("\n🤷 No automated fix found for this issue.\n", .{});
+                            }
+                        }
+                    }
+                }
             }
         },
         else => {

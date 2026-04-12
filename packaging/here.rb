@@ -1,10 +1,10 @@
 class Here < Formula
   desc "Universal package manager that speaks your system's language"
-  homepage "https://github.com/your-repo/here"
-  url "https://github.com/your-repo/here/archive/v1.0.0.tar.gz"
+  homepage "https://codeberg.org/OverHereEnterprise/here"
+  url "https://codeberg.org/OverHereEnterprise/here/archive/v1.0.0.tar.gz"
   sha256 "SKIP"  # Will be updated with actual SHA256
   license "MIT"
-  head "https://github.com/your-repo/here.git", branch: "main"
+  head "https://codeberg.org/OverHereEnterprise/here.git", branch: "main"
 
   depends_on "zig" => :build
 
@@ -42,7 +42,7 @@ class Here < Formula
         here search <package>
         here install <package>
 
-      For more information, visit: https://github.com/your-repo/here
+      For more information, visit: https://codeberg.org/OverHereEnterprise/here
     EOS
   end
 end

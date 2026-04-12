@@ -452,7 +452,7 @@ $(tree -L 2 "$MIGRATION_DIR" 2>/dev/null || find "$MIGRATION_DIR" -type d | head
 ## Support
 
 For more information about the **here** universal package manager:
-- GitHub: https://github.com/instance-select/here
+- Codeberg: https://codeberg.org/OverHereEnterprise/here
 - Documentation: Run \`here help\` after installation
 
 ---

@@ -126,7 +126,7 @@ here update
 Download pre-built binaries from the releases page, or build from source:
 
 ```bash
-git clone https://github.com/your-repo/here.git
+git clone https://codeberg.org/OverHereEnterprise/here.git
 cd here
 zig build -Doptimize=ReleaseFast
 sudo cp zig-out/bin/here /usr/local/bin/

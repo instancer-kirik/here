@@ -32,17 +32,17 @@ curl -fsSL https://instance.select/here | bash -s -- --dir ~/.local/bin
 
 ### 1. Download Pre-Built Binaries
 
-Choose your platform and download from [GitHub Releases](https://github.com/instancer-kirik/here/releases):
+Choose your platform and download from [Codeberg Releases](https://codeberg.org/OverHereEnterprise/here/releases):
 
 **Linux:**
 ```bash
 # x86_64
-wget https://github.com/instancer-kirik/here/releases/download/v1.1.0/here-x86_64-linux
+wget https://codeberg.org/OverHereEnterprise/here/releases/download/v1.1.0/here-x86_64-linux
 chmod +x here-x86_64-linux
 sudo mv here-x86_64-linux /usr/local/bin/here
 
 # ARM64
-wget https://github.com/instancer-kirik/here/releases/download/v1.1.0/here-aarch64-linux
+wget https://codeberg.org/OverHereEnterprise/here/releases/download/v1.1.0/here-aarch64-linux
 chmod +x here-aarch64-linux
 sudo mv here-aarch64-linux /usr/local/bin/here
 ```
@@ -50,12 +50,12 @@ sudo mv here-aarch64-linux /usr/local/bin/here
 **macOS:**
 ```bash
 # Intel
-wget https://github.com/instancer-kirik/here/releases/download/v1.1.0/here-x86_64-macos
+wget https://codeberg.org/OverHereEnterprise/here/releases/download/v1.1.0/here-x86_64-macos
 chmod +x here-x86_64-macos
 sudo mv here-x86_64-macos /usr/local/bin/here
 
 # Apple Silicon
-wget https://github.com/instancer-kirik/here/releases/download/v1.1.0/here-aarch64-macos
+wget https://codeberg.org/OverHereEnterprise/here/releases/download/v1.1.0/here-aarch64-macos
 chmod +x here-aarch64-macos
 sudo mv here-aarch64-macos /usr/local/bin/here
 ```
@@ -74,7 +74,7 @@ For a completely portable installation that works anywhere:
 
 ```bash
 # Download AppImage
-wget https://github.com/instancer-kirik/here/releases/download/v1.1.0/here-1.1.0-x86_64.AppImage
+wget https://codeberg.org/OverHereEnterprise/here/releases/download/v1.1.0/here-1.1.0-x86_64.AppImage
 chmod +x here-1.1.0-x86_64.AppImage
 
 # Run directly
@@ -105,7 +105,7 @@ If you want to build from source or contribute:
 ### Build Steps
 ```bash
 # Clone repository
-git clone https://github.com/instancer-kirik/here.git
+git clone https://codeberg.org/OverHereEnterprise/here.git
 cd here
 
 # Build optimized release
@@ -132,10 +132,10 @@ Run **here** in a container environment:
 ```bash
 # Docker
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/instancer-kirik/here:latest version
+  codeberg.org/overhere-enterprise/here:latest version
 
 # Podman
-podman run --rm ghcr.io/instancer-kirik/here:latest help
+podman run --rm codeberg.org/overhere-enterprise/here:latest help
 ```
 
 ---
@@ -196,7 +196,7 @@ curl -fsSL https://instance.select/here | bash
 ```
 
 ### Manual Update
-1. Download the latest binary from [releases](https://github.com/instancer-kirik/here/releases)
+1. Download the latest binary from [releases](https://codeberg.org/OverHereEnterprise/here/releases)
 2. Replace your existing binary
 3. Verify with `here version`
 
@@ -249,8 +249,8 @@ sudo dnf install fuse
 
 ### Still Having Issues?
 
-1. Check our [GitHub Issues](https://github.com/instancer-kirik/here/issues)
-2. Join our [Discussions](https://github.com/instancer-kirik/here/discussions)
+1. Check our [Codeberg Issues](https://codeberg.org/OverHereEnterprise/here/issues)
+2. Join our [Discussions](https://codeberg.org/OverHereEnterprise/here/issues)
 3. Read the [troubleshooting guide](./README.md#troubleshooting)
 
 ---

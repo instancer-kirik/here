@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # here - Production Readiness Validation Script
-# https://github.com/your-repo/here
+# https://codeberg.org/OverHereEnterprise/here
 
 set -e
 

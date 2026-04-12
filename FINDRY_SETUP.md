@@ -18,8 +18,8 @@ This guide shows how to create a stunning landing page for the `here` universal 
   "description": "Cross-platform package manager with desktop migration tools",
   "category": "Developer Tools",
   "tags": ["package-manager", "linux", "macos", "migration", "zig"],
-  "repository": "https://github.com/instancer-kirik/here",
-  "homepage": "https://github.com/instancer-kirik/here",
+  "repository": "https://codeberg.org/OverHereEnterprise/here",
+  "homepage": "https://codeberg.org/OverHereEnterprise/here",
   "license": "MIT",
   "is_public": true
 }

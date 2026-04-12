@@ -1,5 +1,5 @@
 # Makefile for here - Universal Package Manager
-# https://github.com/your-repo/here
+# https://codeberg.org/OverHereEnterprise/here
 
 .PHONY: all build build-release clean test install uninstall help dev-setup format lint check-fmt validate validate-appimage validate-production
 
@@ -215,4 +215,4 @@ help:
 	@echo "  make run-args ARGS='search vim'"
 	@echo "  make check"
 	@echo ""
-	@echo "For more information, visit: https://github.com/your-repo/here"
+	@echo "For more information, visit: https://codeberg.org/OverHereEnterprise/here"

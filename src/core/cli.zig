@@ -3,7 +3,7 @@ const print = std.debug.print;
 
 pub const Command = enum { install, search, remove, update, list, info, help, version, @"export", import, backup, recover, config, unlock, prunable, standalone, unused, sweep, fallback_search };
 
-pub fn parseCommand(args: []const []const u8) ? Command {
+pub fn parseCommand(args: []const []const u8) ?Command {
     if (args.len < 2) return null;
 
     const cmd = args[1];
@@ -71,7 +71,7 @@ pub fn showHelp() void {
     print("  here recover postgresql\n", .{});
     print("  here config recovery\n", .{});
     print("💖 Support development: 0xaf462cef9e8913a9cb7b6f0ba0ddf5d733eae57a (ETH/Base)\n", .{});
-    print("For more information, visit: https://github.com/instance-select/here\n", .{});
+    print("For more information, visit: https://codeberg.org/OverHereEnterprise/here\n", .{});
 }
 
 pub fn showVersion() void {

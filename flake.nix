@@ -72,7 +72,7 @@
               software using the best available method. No more remembering different
               commands for different systems – just use here.
             '';
-            homepage = "https://github.com/your-repo/here";
+            homepage = "https://codeberg.org/OverHereEnterprise/here";
             license = licenses.mit;
             maintainers = [ ];
             platforms = platforms.unix;

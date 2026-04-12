@@ -4,7 +4,7 @@
   "hero_subtitle": "Universal package manager that speaks every system's language. One tool to rule them all: native packages, Flatpak, AppImage, Nix, and version managers.",
   "hero_image": "https://images.unsplash.com/photo-1629654297299-c8506221ca97?w=1920&h=1080&fit=crop",
   "call_to_action": "Install here",
-  "cta_link": "https://github.com/instancer-kirik/here#installation",
+  "cta_link": "https://codeberg.org/OverHereEnterprise/here#installation",
   "sections": [
     {
       "id": "quickstart",
@@ -49,12 +49,12 @@
   "social_links": [
     {
       "platform": "github",
-      "url": "https://github.com/instancer-kirik/here",
+      "url": "https://codeberg.org/OverHereEnterprise/here",
       "label": "View Source"
     },
     {
       "platform": "website",
-      "url": "https://github.com/instancer-kirik/here/releases",
+      "url": "https://codeberg.org/OverHereEnterprise/here/releases",
       "label": "Download"
     }
   ],

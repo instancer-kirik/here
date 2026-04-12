@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO="instancer-kirik/here"
+REPO="OverHereEnterprise/here"
 INSTALL_DIR="/usr/local/bin"
 TMP_DIR="/tmp/here-install"
 
@@ -94,7 +94,7 @@ check_permissions() {
 
 # Get latest release version
 get_latest_version() {
-    local api_url="https://api.github.com/repos/$REPO/releases/latest"
+    local api_url="https://codeberg.org/api/v1/repos/$REPO/releases?limit=1"
 
     if command -v curl >/dev/null 2>&1; then
         curl -s "$api_url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
@@ -132,7 +132,7 @@ install_here() {
 
     # Setup download
     binary_name="here-${platform}"
-    download_url="https://github.com/$REPO/releases/download/$version/$binary_name"
+    download_url="https://codeberg.org/$REPO/releases/download/$version/$binary_name"
 
     # Create temporary directory
     mkdir -p "$TMP_DIR"

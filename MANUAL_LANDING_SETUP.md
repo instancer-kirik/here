@@ -12,7 +12,7 @@ If you prefer to set up the Findry landing page manually rather than importing J
    - **Description**: `Cross-platform package manager with desktop migration tools`
    - **Category**: `Developer Tools`
    - **Tags**: `package-manager`, `linux`, `macos`, `migration`, `zig`
-   - **Repository**: `https://github.com/instancer-kirik/here`
+   - **Repository**: `https://codeberg.org/OverHereEnterprise/here`
 
 ### 2. Enable Landing Page
 1. Click "Create Landing" button in your project
@@ -23,7 +23,7 @@ If you prefer to set up the Findry landing page manually rather than importing J
 - **Hero Subtitle**: `Universal package manager that speaks every system's language. One tool to rule them all: native packages, Flatpak, AppImage, Nix, and version managers.`
 - **Hero Image URL**: `https://images.unsplash.com/photo-1629654297299-c8506221ca97?w=1920&h=1080&fit=crop`
 - **Call to Action Text**: `Install here`
-- **CTA Link**: `https://github.com/instancer-kirik/here#installation`
+- **CTA Link**: `https://codeberg.org/OverHereEnterprise/here#installation`
 
 ### 4. Add Sections (in order)
 
@@ -122,8 +122,8 @@ Beyond package management - `here` includes enterprise-grade desktop migration t
 ```
 
 ### 5. Configure Social Links
-- **GitHub**: `https://github.com/instancer-kirik/here` (Label: "View Source")
-- **Website**: `https://github.com/instancer-kirik/here/releases` (Label: "Download")
+- **Codeberg**: `https://codeberg.org/OverHereEnterprise/here` (Label: "View Source")
+- **Website**: `https://codeberg.org/OverHereEnterprise/here/releases` (Label: "Download")
 
 ### 6. Customize Colors
 - **Background Color**: `#0a0a0a`
