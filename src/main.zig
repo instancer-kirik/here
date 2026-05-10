@@ -943,7 +943,7 @@ pub fn main() !void {
     // Get packages from remaining args
     const package_args = if (converted_args.len > 2) converted_args[2..] else &[_][]const u8{};
 
-    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and command != .prunable and command != .standalone and command != .sweep and package_args.len == 0) {
+    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and command != .prunable and command != .standalone and command != .sweep and command != .link and package_args.len == 0) {
         print("❌ No packages specified\n", .{});
         return;
     }
@@ -1360,6 +1360,38 @@ pub fn main() !void {
         packages.performPruneFlow(allocator, system_info) catch |err| {
             print("❌ Sweep command failed: {}\n", .{err});
         };
+        return;
+    }
+
+    if (command == .link) {
+        print("🔗 Managing links via biglinks...\n", .{});
+        
+        var cmd_parts = std.ArrayList([]const u8).init(allocator);
+        defer cmd_parts.deinit();
+
+        cmd_parts.append("biglinks") catch return;
+        for (package_args) |arg| {
+            cmd_parts.append(arg) catch return;
+        }
+
+        var child = std.process.Child.init(cmd_parts.items, allocator);
+        child.stdout_behavior = .Inherit;
+        child.stderr_behavior = .Inherit;
+        
+        const term = child.spawnAndWait() catch |err| {
+            print("❌ Failed to execute biglinks: {}\n", .{err});
+            print("💡 Ensure 'biglinks' is installed and in your PATH.\n", .{});
+            return;
+        };
+
+        switch (term) {
+            .Exited => |code| {
+                if (code != 0) {
+                    print("❌ biglinks exited with code: {}\n", .{code});
+                }
+            },
+            else => print("❌ biglinks terminated unexpectedly\n", .{}),
+        }
         return;
     }
 
