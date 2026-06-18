@@ -1,7 +1,7 @@
 const std = @import("std");
 const print = std.debug.print;
 
-pub const Command = enum { install, search, remove, update, list, info, help, version, @"export", import, backup, recover, config, unlock, prunable, standalone, unused, sweep, fallback_search, link };
+pub const Command = enum { install, search, remove, update, list, info, help, version, @"export", import, backup, recover, config, unlock, prunable, standalone, unused, sweep, fallback_search, link, pkgbuild, audit };
 
 pub fn parseCommand(args: []const []const u8) ?Command {
     if (args.len < 2) return null;
@@ -25,6 +25,8 @@ pub fn parseCommand(args: []const []const u8) ?Command {
     if (std.mem.eql(u8, cmd, "standalone")) return .standalone;
     if (std.mem.eql(u8, cmd, "sweep") or std.mem.eql(u8, cmd, "prune")) return .sweep;
     if (std.mem.eql(u8, cmd, "link") or std.mem.eql(u8, cmd, "biglinks")) return .link;
+    if (std.mem.eql(u8, cmd, "pkgbuild") or std.mem.eql(u8, cmd, "pb")) return .pkgbuild;
+    if (std.mem.eql(u8, cmd, "audit") or std.mem.eql(u8, cmd, "sc-audit")) return .audit;
 
     // If no known command matches, treat it as a search query (like yay does)
     return .fallback_search;
@@ -55,6 +57,10 @@ pub fn showHelp() void {
     print("  unused, prunable    List unneeded dependencies (orphans)\n", .{});
     print("  sweep, prune        Interactive flow to remove unused packages\n", .{});
     print("  link [args...]      Manage smart directory symlinks via biglinks\n", .{});
+    print("  pkgbuild <pkg>      View PKGBUILD for an AUR/official package before installing\n", .{});
+    print("  audit [path]        Scan npm/bun/pip installs for orphan-takeover attack indicators\n", .{});
+    print("                      Flags: --verbose (-v)  show all recent packages\n", .{});
+    print("                             --recent        show only recently modified packages\n", .{});
     print("  version             Show version information\n", .{});
     print("  help                Show this help\n\n", .{});
     print("Examples:\n", .{});
@@ -72,6 +78,9 @@ pub fn showHelp() void {
     print("  here recover --docker --postgresql\n", .{});
     print("  here recover postgresql\n", .{});
     print("  here config recovery\n", .{});
+    print("  here pkgbuild visual-studio-code-bin\n", .{});
+    print("  here audit\n", .{});
+    print("  here audit ~/projects/myapp --verbose\n", .{});
     print("💖 Support development: 0xaf462cef9e8913a9cb7b6f0ba0ddf5d733eae57a (ETH/Base)\n", .{});
     print("For more information, visit: https://codeberg.org/OverHereEnterprise/here\n", .{});
 }

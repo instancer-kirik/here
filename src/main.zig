@@ -15,6 +15,7 @@ const system = @import("core/system.zig");
 const cli = @import("core/cli.zig");
 const packages = @import("core/packages.zig");
 const profiles = @import("core/profiles.zig");
+const audit = @import("audit.zig");
 
 // Type aliases for compatibility
 const SystemInfo = system.SystemInfo;
@@ -943,7 +944,7 @@ pub fn main() !void {
     // Get packages from remaining args
     const package_args = if (converted_args.len > 2) converted_args[2..] else &[_][]const u8{};
 
-    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and command != .prunable and command != .standalone and command != .sweep and command != .link and package_args.len == 0) {
+    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and command != .prunable and command != .standalone and command != .sweep and command != .link and command != .audit and command != .pkgbuild and package_args.len == 0) {
         print("❌ No packages specified\n", .{});
         return;
     }
@@ -1365,19 +1366,19 @@ pub fn main() !void {
 
     if (command == .link) {
         print("🔗 Managing links via biglinks...\n", .{});
-        
-        var cmd_parts = std.ArrayList([]const u8).init(allocator);
-        defer cmd_parts.deinit();
 
-        cmd_parts.append("biglinks") catch return;
+        var cmd_parts = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+        defer cmd_parts.deinit(allocator);
+
+        cmd_parts.append(allocator, "biglinks") catch return;
         for (package_args) |arg| {
-            cmd_parts.append(arg) catch return;
+            cmd_parts.append(allocator, arg) catch return;
         }
 
         var child = std.process.Child.init(cmd_parts.items, allocator);
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
-        
+
         const term = child.spawnAndWait() catch |err| {
             print("❌ Failed to execute biglinks: {}\n", .{err});
             print("💡 Ensure 'biglinks' is installed and in your PATH.\n", .{});
@@ -1392,6 +1393,20 @@ pub fn main() !void {
             },
             else => print("❌ biglinks terminated unexpectedly\n", .{}),
         }
+        return;
+    }
+
+    if (command == .pkgbuild) {
+        audit.runPkgbuild(allocator, package_args) catch |err| {
+            print("❌ pkgbuild command failed: {}\n", .{err});
+        };
+        return;
+    }
+
+    if (command == .audit) {
+        audit.runAudit(allocator, package_args) catch |err| {
+            print("❌ Audit failed: {}\n", .{err});
+        };
         return;
     }
 
@@ -1488,13 +1503,13 @@ pub fn main() !void {
                             diag_child.stdout_behavior = .Pipe;
                             diag_child.stderr_behavior = .Pipe;
 
-                            var stdout_buf = std.ArrayList(u8).init(allocator);
-                            var stderr_buf = std.ArrayList(u8).init(allocator);
-                            defer stdout_buf.deinit();
-                            defer stderr_buf.deinit();
+                            var stdout_buf = std.ArrayList(u8){};
+                            var stderr_buf = std.ArrayList(u8){};
+                            defer stdout_buf.deinit(allocator);
+                            defer stderr_buf.deinit(allocator);
 
                             diag_child.spawn() catch {};
-                            diag_child.collectOutput(&stdout_buf, &stderr_buf, 10 * 1024 * 1024) catch {};
+                            diag_child.collectOutput(allocator, &stdout_buf, &stderr_buf, 10 * 1024 * 1024) catch {};
                             _ = diag_child.wait() catch {};
 
                             const action_opt = smart_recovery.analyzeFailure(allocator, system_info, stdout_buf.items, stderr_buf.items) catch null;
@@ -1508,14 +1523,14 @@ pub fn main() !void {
                                     const fix_bytes = stdin.read(buf[0..]) catch 0;
                                     const fix_input = std.mem.trim(u8, buf[0..fix_bytes], " \t\r\n");
                                     if (fix_input.len > 0 and (fix_input[0] == 'y' or fix_input[0] == 'Y')) {
-                                        var fixed_cmd = std.ArrayList([]const u8).init(allocator);
-                                        defer fixed_cmd.deinit();
+                                        var fixed_cmd = std.ArrayList([]const u8){};
+                                        defer fixed_cmd.deinit(allocator);
 
                                         for (cmd_parts) |part| {
-                                            fixed_cmd.append(part) catch continue;
+                                            fixed_cmd.append(allocator, part) catch continue;
                                             if (std.mem.eql(u8, part, "-S") or std.mem.eql(u8, part, "install")) {
-                                                fixed_cmd.append("--mflags") catch continue;
-                                                fixed_cmd.append("--skipchecksums") catch continue;
+                                                fixed_cmd.append(allocator, "--mflags") catch continue;
+                                                fixed_cmd.append(allocator, "--skipchecksums") catch continue;
                                             }
                                         }
 
