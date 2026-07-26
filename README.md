@@ -17,6 +17,7 @@
 - 🎯 **Intelligent Matching**: Maps package names to correct Flatpak IDs, Nix packages, and AppImage releases automatically  
 - 💡 **Helpful Suggestions**: Recommends version managers, Nix shells, and AppImages for development tools
 - 🔄 **System Recovery**: Restore Docker, Podman, PostgreSQL/PostGIS from backup
+- 🧹 **Cache Cleaning**: Easily clear package manager download & build caches (`here clean`)
 - 📤 **Migration Tools**: Export/import system profiles for easy migration
 - 🌍 **Cross-platform**: Works on Arch, Ubuntu, Debian, Fedora, openSUSE, NixOS, macOS, and more
 
@@ -35,6 +36,10 @@ here remove bloatware
 
 # Update all packages
 here update
+
+# Clear package manager caches
+here clean
+here clean --all
 
 # List installed packages
 here list

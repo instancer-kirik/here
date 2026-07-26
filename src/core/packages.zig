@@ -859,3 +859,128 @@ pub fn performPruneFlow(allocator: Allocator, system_info: SystemInfo) !void {
         }
     }
 }
+
+pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []const []const u8) !void {
+    var aggressive = false;
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--all") or std.mem.eql(u8, arg, "-a")) {
+            aggressive = true;
+        }
+    }
+
+    print("🧹 Cleaning package manager caches...\n", .{});
+
+    // 1. Native package manager cache cleaning
+    switch (system_info.package_manager) {
+        .yay, .paru, .pacman => {
+            const clean_flag = if (aggressive) "-Scc" else "-Sc";
+
+            // Clean leftover temporary download directories from interrupted pacman downloads
+            print("  • Removing stale pacman download directories...\n", .{});
+            var clean_dl = std.process.Child.init(&[_][]const u8{ "sudo", "sh", "-c", "rm -rf /var/cache/pacman/pkg/download-*" }, allocator);
+            clean_dl.stdout_behavior = .Ignore;
+            clean_dl.stderr_behavior = .Ignore;
+            _ = clean_dl.spawnAndWait() catch {};
+
+            print("  • Running sudo pacman {s}...\n", .{clean_flag});
+            var pacman_cmd = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+            defer pacman_cmd.deinit(allocator);
+            try pacman_cmd.append(allocator, "sudo");
+            try pacman_cmd.append(allocator, "pacman");
+            try pacman_cmd.append(allocator, clean_flag);
+            try pacman_cmd.append(allocator, "--noconfirm");
+
+            var child = std.process.Child.init(pacman_cmd.items, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean pacman cache: {}\n", .{err});
+
+            // If using yay/paru, also clean AUR cache
+            if (system_info.package_manager == .yay or system_info.package_manager == .paru) {
+                const pm_str = system_info.package_manager.toString();
+                print("  • Cleaning {s} AUR cache...\n", .{pm_str});
+                var aur_cmd = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+                defer aur_cmd.deinit(allocator);
+                try aur_cmd.append(allocator, pm_str);
+                try aur_cmd.append(allocator, clean_flag);
+                try aur_cmd.append(allocator, "--noconfirm");
+
+                var aur_child = std.process.Child.init(aur_cmd.items, allocator);
+                aur_child.stdout_behavior = .Inherit;
+                aur_child.stderr_behavior = .Inherit;
+                const term = aur_child.spawnAndWait() catch |err| {
+                    print("⚠️ Failed to clean {s} AUR cache: {}\n", .{ pm_str, err });
+                    return;
+                };
+
+                // exit status 187 is yay's normal exit code when user/non-interactive declines unused repo removal
+                switch (term) {
+                    .Exited => |code| {
+                        if (code != 0 and code != 187) {
+                            print("⚠️ {s} cache clean exited with code {}\n", .{ pm_str, code });
+                        }
+                    },
+                    else => {},
+                }
+            }
+        },
+        .apt => {
+            print("  • Running sudo apt clean...\n", .{});
+            var child = std.process.Child.init(&[_][]const u8{ "sudo", "apt", "clean" }, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean apt cache: {}\n", .{err});
+
+            if (aggressive) {
+                print("  • Running sudo apt autoremove...\n", .{});
+                var auto_child = std.process.Child.init(&[_][]const u8{ "sudo", "apt", "autoremove", "-y" }, allocator);
+                auto_child.stdout_behavior = .Inherit;
+                auto_child.stderr_behavior = .Inherit;
+                _ = auto_child.spawnAndWait() catch |err| print("⚠️ Failed apt autoremove: {}\n", .{err});
+            }
+        },
+        .dnf => {
+            print("  • Running sudo dnf clean all...\n", .{});
+            var child = std.process.Child.init(&[_][]const u8{ "sudo", "dnf", "clean", "all" }, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean dnf cache: {}\n", .{err});
+        },
+        .zypper => {
+            print("  • Running sudo zypper clean --all...\n", .{});
+            var child = std.process.Child.init(&[_][]const u8{ "sudo", "zypper", "clean", "--all" }, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean zypper cache: {}\n", .{err});
+        },
+        .nix => {
+            if (aggressive) {
+                print("  • Running nix-collect-garbage -d...\n", .{});
+                var child = std.process.Child.init(&[_][]const u8{ "nix-collect-garbage", "-d" }, allocator);
+                child.stdout_behavior = .Inherit;
+                child.stderr_behavior = .Inherit;
+                _ = child.spawnAndWait() catch |err| print("⚠️ Failed to collect nix garbage: {}\n", .{err});
+            } else {
+                print("  • Running nix-collect-garbage...\n", .{});
+                var child = std.process.Child.init(&[_][]const u8{"nix-collect-garbage"}, allocator);
+                child.stdout_behavior = .Inherit;
+                child.stderr_behavior = .Inherit;
+                _ = child.spawnAndWait() catch |err| print("⚠️ Failed to collect nix garbage: {}\n", .{err});
+            }
+        },
+        .unknown => {},
+    }
+
+    // 2. Additional package source cleanup (e.g. Flatpak)
+    for (system_info.package_sources) |source| {
+        if (source == .flatpak) {
+            print("  • Cleaning unused Flatpak runtimes...\n", .{});
+            var child = std.process.Child.init(&[_][]const u8{ "flatpak", "uninstall", "--unused", "-y" }, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean flatpak unused packages: {}\n", .{err});
+        }
+    }
+
+    print("✨ Cache cleanup completed!\n", .{});
+}

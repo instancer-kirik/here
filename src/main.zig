@@ -802,7 +802,7 @@ fn printVersion() void {
 // Use cli.showHelp() instead of local printHelp()
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -944,7 +944,7 @@ pub fn main() !void {
     // Get packages from remaining args
     const package_args = if (converted_args.len > 2) converted_args[2..] else &[_][]const u8{};
 
-    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and command != .prunable and command != .standalone and command != .sweep and command != .link and command != .audit and command != .pkgbuild and package_args.len == 0) {
+    if (command != .update and command != .@"export" and command != .import and command != .backup and command != .recover and command != .unlock and command != .prunable and command != .standalone and command != .sweep and command != .clean and command != .link and command != .audit and command != .pkgbuild and package_args.len == 0) {
         print("❌ No packages specified\n", .{});
         return;
     }
@@ -1360,6 +1360,13 @@ pub fn main() !void {
     if (command == .sweep) {
         packages.performPruneFlow(allocator, system_info) catch |err| {
             print("❌ Sweep command failed: {}\n", .{err});
+        };
+        return;
+    }
+
+    if (command == .clean) {
+        packages.performCleanFlow(allocator, system_info, package_args) catch |err| {
+            print("❌ Clean command failed: {}\n", .{err});
         };
         return;
     }

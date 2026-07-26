@@ -1,7 +1,7 @@
 const std = @import("std");
 const print = std.debug.print;
 
-pub const Command = enum { install, search, remove, update, list, info, help, version, @"export", import, backup, recover, config, unlock, prunable, standalone, unused, sweep, fallback_search, link, pkgbuild, audit };
+pub const Command = enum { install, search, remove, update, list, info, help, version, @"export", import, backup, recover, config, unlock, prunable, standalone, unused, sweep, fallback_search, link, pkgbuild, audit, clean };
 
 pub fn parseCommand(args: []const []const u8) ?Command {
     if (args.len < 2) return null;
@@ -24,6 +24,7 @@ pub fn parseCommand(args: []const []const u8) ?Command {
     if (std.mem.eql(u8, cmd, "prunable") or std.mem.eql(u8, cmd, "unused")) return .prunable;
     if (std.mem.eql(u8, cmd, "standalone")) return .standalone;
     if (std.mem.eql(u8, cmd, "sweep") or std.mem.eql(u8, cmd, "prune")) return .sweep;
+    if (std.mem.eql(u8, cmd, "clean") or std.mem.eql(u8, cmd, "clean-cache") or std.mem.eql(u8, cmd, "clear-cache")) return .clean;
     if (std.mem.eql(u8, cmd, "link") or std.mem.eql(u8, cmd, "biglinks")) return .link;
     if (std.mem.eql(u8, cmd, "pkgbuild") or std.mem.eql(u8, cmd, "pb")) return .pkgbuild;
     if (std.mem.eql(u8, cmd, "audit") or std.mem.eql(u8, cmd, "sc-audit")) return .audit;
@@ -56,11 +57,16 @@ pub fn showHelp() void {
     print("  standalone          List packages you installed intentionally (top-level)\n", .{});
     print("  unused, prunable    List unneeded dependencies (orphans)\n", .{});
     print("  sweep, prune        Interactive flow to remove unused packages\n", .{});
+    print("  clean, clean-cache  Clear package manager download & build caches\n", .{});
+    print("                      Use --all for aggressive purge (e.g. pacman -Scc, nix GC)\n", .{});
     print("  link [args...]      Manage smart directory symlinks via biglinks\n", .{});
     print("  pkgbuild <pkg>      View PKGBUILD for an AUR/official package before installing\n", .{});
-    print("  audit [path]        Scan npm/bun/pip installs for orphan-takeover attack indicators\n", .{});
-    print("                      Flags: --verbose (-v)  show all recent packages\n", .{});
-    print("                             --recent        show only recently modified packages\n", .{});
+    print("  audit [path]        Scan npm/bun/pip/cargo/gem/hex installs for supply-chain attacks\n", .{});
+    print("                      Checks: lifecycle scripts, typosquatting, lockfile presence,\n", .{});
+    print("                              Cargo build.rs, ecosystem-native advisories\n", .{});
+    print("                      Flags: --deep     npm registry publisher-change + version age\n", .{});
+    print("                             --verbose  show all recently modified packages\n", .{});
+    print("                             --recent   show only recently modified packages\n", .{});
     print("  version             Show version information\n", .{});
     print("  help                Show this help\n\n", .{});
     print("Examples:\n", .{});
@@ -68,6 +74,8 @@ pub fn showHelp() void {
     print("  here search python\n", .{});
     print("  here remove bloatware\n", .{});
     print("  here update\n", .{});
+    print("  here clean\n", .{});
+    print("  here clean --all\n", .{});
     print("  here export my-setup.json\n", .{});
     print("  here export --include-config my-full-setup.json\n", .{});
     print("  here import my-setup.json\n", .{});
@@ -102,7 +110,7 @@ pub fn isLikelySearchQuery(command: []const u8) bool {
     if (command.len < 2) return false;
 
     // Don't treat obvious command typos as search queries
-    const common_typos = [_][]const u8{ "instal", "serach", "remov", "updat", "lis", "inf", "hel", "versio", "expor", "impor", "backu", "recov", "confi" };
+    const common_typos = [_][]const u8{ "instal", "serach", "remov", "updat", "lis", "inf", "hel", "versio", "expor", "impor", "backu", "recov", "confi", "clea" };
     for (common_typos) |typo| {
         if (std.mem.eql(u8, command, typo)) return false;
     }
