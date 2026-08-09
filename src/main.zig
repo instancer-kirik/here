@@ -801,15 +801,19 @@ fn printVersion() void {
 
 // Use cli.showHelp() instead of local printHelp()
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    // Use args directly - they're already the right type
+    // Collect args from the 0.16 iterator into a slice
+    var args_list = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer args_list.deinit(allocator);
+    var args_it = std.process.Args.Iterator.init(init.args);
+    while (args_it.next()) |arg| {
+        try args_list.append(allocator, arg);
+    }
+    const args = args_list.items;
     const converted_args = args;
 
     if (args.len < 2) {

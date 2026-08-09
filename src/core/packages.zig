@@ -499,10 +499,18 @@ pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, s
             var child = std.process.Child.init(cmd_parts, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
-            _ = child.spawnAndWait() catch |err| {
+            const term = child.spawnAndWait() catch |err| {
                 print("❌ Failed to install {s}: {}\n", .{ pkg_name, err });
                 continue;
             };
+
+            const exit_code = switch (term) {
+                .Exited => |code| code,
+                else => 1,
+            };
+            if (exit_code != 0) {
+                try retryInstallWithOverwrite(allocator, system_info, pkg_name);
+            }
         }
     }
 }
@@ -684,6 +692,74 @@ pub const PrunablePackage = struct {
     }
 };
 
+/// After a failed install, detect whether the package manager supports a
+/// force-overwrite flag and — if so — offer an interactive retry.
+/// Handles the common "conflicting files already exist in filesystem" error
+/// that occurs when files were installed outside of the package manager.
+fn retryInstallWithOverwrite(allocator: Allocator, system_info: SystemInfo, pkg_name: []const u8) !void {
+    // Build the overwrite variant per package manager family.
+    // Returns null when the PM has no meaningful overwrite flag.
+    const overwrite_extra: ?[]const []const u8 = switch (system_info.package_manager) {
+        // pacman / yay / paru: --overwrite '*' takes ownership of conflicting paths
+        .pacman, .yay, .paru => &[_][]const u8{ "--overwrite", "*" },
+        // apt: --reinstall alone won't help; -o Dpkg::Options::=--force-overwrite does
+        .apt => &[_][]const u8{ "-o", "Dpkg::Options::=--force-overwrite" },
+        // dnf/zypper/others: no well-known safe overwrite flag, skip
+        else => null,
+    };
+
+    const extra = overwrite_extra orelse {
+        print("⚠️  No automatic overwrite strategy for {s}. Resolve conflicting files manually.\n", .{system_info.package_manager.toString()});
+        return;
+    };
+
+    print("\n⚠️  Installation failed — this may be caused by conflicting files already present\n", .{});
+    print("   on the filesystem outside of the package manager.\n", .{});
+    print("   Retry with --overwrite / force-install? [y/N] ", .{});
+
+    var buf: [8]u8 = undefined;
+    const stdin = std.fs.File.stdin();
+    const n = stdin.read(buf[0..]) catch return;
+    const answer = std.mem.trim(u8, buf[0..n], " \t\r\n");
+    if (answer.len == 0 or (answer[0] != 'y' and answer[0] != 'Y')) {
+        print("⏹️  Skipping overwrite retry for {s}.\n", .{pkg_name});
+        return;
+    }
+
+    // Rebuild the base install command then splice in the extra flags before the package name.
+    const base = try buildCommand(allocator, system_info, .install, &[_][]const u8{});
+    defer allocator.free(base);
+
+    // base ends with --noconfirm (or -y for apt); insert extra flags after that, then the package.
+    var retry_cmd = ArrayList([]const u8){};
+    defer retry_cmd.deinit(allocator);
+    for (base) |arg| try retry_cmd.append(allocator, arg);
+    for (extra) |arg| try retry_cmd.append(allocator, arg);
+    try retry_cmd.append(allocator, pkg_name);
+
+    print("🔄 Retrying: ", .{});
+    for (retry_cmd.items) |arg| print("{s} ", .{arg});
+    print("\n", .{});
+
+    var child = std.process.Child.init(retry_cmd.items, allocator);
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+    const term = child.spawnAndWait() catch |err| {
+        print("❌ Overwrite retry failed to launch: {}\n", .{err});
+        return;
+    };
+    const code = switch (term) {
+        .Exited => |c| c,
+        else => 1,
+    };
+    if (code == 0) {
+        print("✅ {s} installed successfully with overwrite.\n", .{pkg_name});
+    } else {
+        print("❌ Overwrite retry also failed for {s} (exit {}).\n", .{ pkg_name, code });
+        print("   You may need to remove the conflicting files manually, then retry.\n", .{});
+    }
+}
+
 pub fn getPrunablePackages(allocator: Allocator, system_info: SystemInfo) !ArrayList(PrunablePackage) {
     var cmd_parts = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
     defer cmd_parts.deinit(allocator);
@@ -708,7 +784,7 @@ pub fn getPrunablePackages(allocator: Allocator, system_info: SystemInfo) !Array
             const basic_parts = try buildCommand(allocator, system_info, .prunable, &[_][]const u8{});
             for (basic_parts) |part| try cmd_parts.append(allocator, part);
             allocator.free(basic_parts);
-        }
+        },
     }
 
     const result = try std.process.Child.run(.{
@@ -818,9 +894,9 @@ pub fn performPruneFlow(allocator: Allocator, system_info: SystemInfo) !void {
     print("\n🧹 Found {} unused packages:\n", .{prunable.items.len});
     for (prunable.items) |pkg| {
         if (pkg.description.len > 0 and pkg.repository.len > 0) {
-            print("\n  • \x1b[1m{s}\x1b[0m {s} \x1b[38;5;242m{s}\x1b[0m\n      └─ {s}\n", .{pkg.name, pkg.repository, pkg.version, pkg.description});
+            print("\n  • \x1b[1m{s}\x1b[0m {s} \x1b[38;5;242m{s}\x1b[0m\n      └─ {s}\n", .{ pkg.name, pkg.repository, pkg.version, pkg.description });
         } else if (pkg.description.len > 0) {
-            print("\n  • \x1b[1m{s}\x1b[0m \x1b[38;5;242m{s}\x1b[0m\n      └─ {s}\n", .{pkg.name, pkg.version, pkg.description});
+            print("\n  • \x1b[1m{s}\x1b[0m \x1b[38;5;242m{s}\x1b[0m\n      └─ {s}\n", .{ pkg.name, pkg.version, pkg.description });
         } else {
             print("  • \x1b[1m{s}\x1b[0m\n", .{pkg.name});
         }
@@ -838,7 +914,7 @@ pub fn performPruneFlow(allocator: Allocator, system_info: SystemInfo) !void {
         const input = std.mem.trim(u8, buf[0..bytes_read], " \t\r\n");
         if (input.len > 0 and (input[0] == 'y' or input[0] == 'Y')) {
             print("🚀 Pruning packages...\n", .{});
-            
+
             var names = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
             defer names.deinit(allocator);
             for (prunable.items) |pkg| {
@@ -852,7 +928,7 @@ pub fn performPruneFlow(allocator: Allocator, system_info: SystemInfo) !void {
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = try child.spawnAndWait();
-            
+
             print("\n✅ System cleaned successfully!\n", .{});
         } else {
             print("⏹️  Prune cancelled.\n", .{});
