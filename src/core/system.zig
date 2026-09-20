@@ -1,5 +1,6 @@
 const std = @import("std");
 const print = std.debug.print;
+const fs_compat = @import("../fs_compat.zig");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
@@ -228,10 +229,7 @@ pub fn detectSystem(allocator: Allocator) !SystemInfo {
     };
 
     for (os_release_paths) |path| {
-        const file = std.fs.openFileAbsolute(path, .{}) catch continue;
-        defer file.close();
-
-        const contents = file.readToEndAlloc(allocator, 1024 * 1024) catch continue;
+        const contents = fs_compat.readFileAlloc(allocator, path, 1024 * 1024) catch continue;
         defer allocator.free(contents);
 
         var distro: Distro = .unknown;

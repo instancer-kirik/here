@@ -1,5 +1,6 @@
 const std = @import("std");
 const print = std.debug.print;
+const fs_compat = @import("fs_compat.zig");
 const system = @import("core/system.zig");
 
 pub const RecoveryService = enum {
@@ -128,41 +129,41 @@ fn detectDatabases(allocator: std.mem.Allocator) ![]DetectedDatabase {
     // Check for PostgreSQL
     var pg_path_buf: [512]u8 = undefined;
     const pg_path = try std.fmt.bufPrint(pg_path_buf[0..], "{s}/.postgres/data", .{BACKUP_PATH});
-    if (std.fs.cwd().access(pg_path, .{})) |_| {
+    if (fs_compat.accessExists(pg_path)) {
         if (detectPostgreSQLVersion(allocator, pg_path)) |version| {
             defer allocator.free(version);
             const size = getDirSize(pg_path) catch 0;
             try databases.append(allocator, DetectedDatabase.init("PostgreSQL", version, size, pg_path));
             print("✅ Found PostgreSQL v{s} (~{:.1}GB)\n", .{ version, @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0 / 1024.0 });
         } else |_| {}
-    } else |_| {}
+    }
 
     // Check for MySQL/MariaDB
     var mysql_path_buf: [512]u8 = undefined;
     const mysql_path = try std.fmt.bufPrint(mysql_path_buf[0..], "{s}/.mysql", .{BACKUP_PATH});
-    if (std.fs.cwd().access(mysql_path, .{})) |_| {
+    if (fs_compat.accessExists(mysql_path)) {
         const size = getDirSize(mysql_path) catch 0;
         try databases.append(allocator, DetectedDatabase.init("MySQL", "unknown", size, mysql_path));
         print("✅ Found MySQL/MariaDB data (~{:.1}GB)\n", .{@as(f64, @floatFromInt(size)) / 1024.0 / 1024.0 / 1024.0});
-    } else |_| {}
+    }
 
     // Check for MongoDB
     var mongo_path_buf: [512]u8 = undefined;
     const mongo_path = try std.fmt.bufPrint(mongo_path_buf[0..], "{s}/.mongodb", .{BACKUP_PATH});
-    if (std.fs.cwd().access(mongo_path, .{})) |_| {
+    if (fs_compat.accessExists(mongo_path)) {
         const size = getDirSize(mongo_path) catch 0;
         try databases.append(allocator, DetectedDatabase.init("MongoDB", "unknown", size, mongo_path));
         print("✅ Found MongoDB data (~{:.1}GB)\n", .{@as(f64, @floatFromInt(size)) / 1024.0 / 1024.0 / 1024.0});
-    } else |_| {}
+    }
 
     // Check for Redis
     var redis_path_buf: [512]u8 = undefined;
     const redis_path = try std.fmt.bufPrint(redis_path_buf[0..], "{s}/.redis", .{BACKUP_PATH});
-    if (std.fs.cwd().access(redis_path, .{})) |_| {
+    if (fs_compat.accessExists(redis_path)) {
         const size = getDirSize(redis_path) catch 0;
         try databases.append(allocator, DetectedDatabase.init("Redis", "unknown", size, redis_path));
         print("✅ Found Redis data (~{:.1}GB)\n", .{@as(f64, @floatFromInt(size)) / 1024.0 / 1024.0 / 1024.0});
-    } else |_| {}
+    }
 
     return databases.toOwnedSlice(allocator);
 }
@@ -170,7 +171,7 @@ fn detectDatabases(allocator: std.mem.Allocator) ![]DetectedDatabase {
 fn detectPostgreSQLVersion(allocator: std.mem.Allocator, data_path: []const u8) ![]u8 {
     var version_file_buf: [512]u8 = undefined;
     const version_file = try std.fmt.bufPrint(version_file_buf[0..], "{s}/PG_VERSION", .{data_path});
-    const version_content = try std.fs.cwd().readFileAlloc(allocator, version_file, 10);
+    const version_content = try fs_compat.readFileAlloc(allocator, version_file, 10);
     return allocator.dupe(u8, std.mem.trim(u8, version_content, " \t\r\n"));
 }
 
@@ -278,7 +279,7 @@ pub fn runRecovery(allocator: std.mem.Allocator, args: []const []const u8) !void
 }
 
 fn checkBackupExists() bool {
-    std.fs.cwd().access(BACKUP_PATH, .{}) catch return false;
+    if (!fs_compat.accessExists(BACKUP_PATH)) return false;
     return true;
 }
 
@@ -311,8 +312,7 @@ fn runInteractiveRecovery(allocator: std.mem.Allocator) !void {
     while (true) {
         print("Choose recovery option [1-7]: ", .{});
 
-        const stdin = std.fs.File.stdin();
-        const bytes_read = stdin.read(buffer[0..]) catch continue;
+        const bytes_read = std.posix.read(std.posix.STDIN_FILENO, buffer[0..]) catch continue;
         if (bytes_read > 0) {
             const input = buffer[0..bytes_read];
             const trimmed = std.mem.trim(u8, input, " \t\r\n");
@@ -364,15 +364,14 @@ fn runCustomSelection(allocator: std.mem.Allocator) !void {
 
     // Docker
     print("Recover Docker? [y/N]: ", .{});
-    const stdin = std.fs.File.stdin();
-    const docker_bytes = stdin.read(buffer[0..]) catch 0;
+    const docker_bytes = std.posix.read(std.posix.STDIN_FILENO, buffer[0..]) catch 0;
     const docker_input = if (docker_bytes > 0) buffer[0..docker_bytes] else "";
     const recover_docker = std.mem.startsWith(u8, std.mem.trim(u8, docker_input, " \t\r\n"), "y") or
         std.mem.startsWith(u8, std.mem.trim(u8, docker_input, " \t\r\n"), "Y");
 
     // Podman
     print("Recover Podman? [y/N]: ", .{});
-    const podman_bytes = stdin.read(buffer[0..]) catch 0;
+    const podman_bytes = std.posix.read(std.posix.STDIN_FILENO, buffer[0..]) catch 0;
     const podman_input = if (podman_bytes > 0) buffer[0..podman_bytes] else "";
     const recover_podman = std.mem.startsWith(u8, std.mem.trim(u8, podman_input, " \t\r\n"), "y") or
         std.mem.startsWith(u8, std.mem.trim(u8, podman_input, " \t\r\n"), "Y");
@@ -493,7 +492,7 @@ fn recoverPostgreSQL(allocator: std.mem.Allocator) !void {
     // Check backup data
     var pg_backup_path_buf: [512]u8 = undefined;
     const pg_backup_path = try std.fmt.bufPrint(pg_backup_path_buf[0..], "{s}/.postgres/data", .{BACKUP_PATH});
-    std.fs.cwd().access(pg_backup_path, .{}) catch {
+    if (!fs_compat.accessExists(pg_backup_path)) {
         print("❌ PostgreSQL backup data not found: {s}\n", .{pg_backup_path});
         return RecoveryError.BackupNotFound;
     };
@@ -501,7 +500,7 @@ fn recoverPostgreSQL(allocator: std.mem.Allocator) !void {
     // Read PostgreSQL version from backup
     var version_file_buf: [512]u8 = undefined;
     const version_file = try std.fmt.bufPrint(version_file_buf[0..], "{s}/PG_VERSION", .{pg_backup_path});
-    const backup_version_content = std.fs.cwd().readFileAlloc(allocator, version_file, 10) catch "unknown";
+    const backup_version_content = fs_compat.readFileAlloc(allocator, version_file, 10) catch allocator.dupe(u8, "unknown") catch "unknown";
     defer allocator.free(backup_version_content);
     const backup_pg_version = std.mem.trim(u8, backup_version_content, " \t\r\n");
     print("📊 Backup PostgreSQL version: {s}\n", .{backup_pg_version});
@@ -569,7 +568,7 @@ fn recoverAppMan(allocator: std.mem.Allocator) !void {
 
     // Check if AppMan backup exists
     const appman_backup_path = BACKUP_PATH ++ "/Applications/appman";
-    std.fs.cwd().access(appman_backup_path, .{}) catch {
+    if (!fs_compat.accessExists(appman_backup_path)) {
         print("⚠️  No AppMan backup found at: {s}\n", .{appman_backup_path});
         print("💡 Installing fresh AppMan instead...\n", .{});
         try installFreshAppMan(allocator);
@@ -581,14 +580,13 @@ fn recoverAppMan(allocator: std.mem.Allocator) !void {
 
     // Restore AppMan binary
     const appman_bin_backup = BACKUP_PATH ++ "/.local/bin/appman";
-    std.fs.cwd().access(appman_bin_backup, .{}) catch {
+    if (!fs_compat.accessExists(appman_bin_backup)) {
         print("⚠️  AppMan binary not found in backup, installing fresh...\n", .{});
         try installFreshAppMan(allocator);
-        return;
-    };
+    }
 
     try createDirectoryIfNotExists(".local/bin");
-    std.fs.cwd().copyFile(appman_bin_backup, std.fs.cwd(), ".local/bin/appman", .{}) catch |err| {
+    if (!fs_compat.copyFileSpawn(allocator, appman_bin_backup, ".local/bin/appman")) {
         print("❌ Failed to restore AppMan binary: {}\n", .{err});
         return;
     };
@@ -614,11 +612,10 @@ fn recoverNix(_: std.mem.Allocator) !void {
 
     // Check for Nix profile backup
     const nix_profile_backup = BACKUP_PATH ++ "/.nix-profile";
-    std.fs.cwd().access(nix_profile_backup, .{}) catch {
+    if (!fs_compat.accessExists(nix_profile_backup)) {
         print("⚠️  No Nix profile backup found\n", .{});
         print("💡 Nix is installed but no profile to restore\n", .{});
-        return;
-    };
+    }
 
     print("🔄 Restoring Nix profile...\n", .{});
     try restoreNixProfile();
@@ -712,10 +709,8 @@ fn runCommand(args: []const []const u8) !void {
 }
 
 fn createDirectoryIfNotExists(path: []const u8) !void {
-    std.fs.cwd().makeDir(path) catch |err| {
-        if (err != error.PathAlreadyExists) {
-            return err;
-        }
+    fs_compat.makeDir(path) catch |err| {
+        if (err != error.PathAlreadyExists) return err;
     };
 }
 
@@ -724,10 +719,10 @@ fn restoreDockerConfig() !void {
     const backup_config = try std.fmt.bufPrint(backup_config_buf[0..], "{s}/.docker/config.json", .{BACKUP_PATH});
     const target_config = ".docker/config.json";
 
-    std.fs.cwd().copyFile(backup_config, std.fs.cwd(), target_config, .{}) catch |err| {
-        print("⚠️  Could not restore Docker config: {}\n", .{err});
+    if (!fs_compat.copyFileSpawn(std.heap.page_allocator, backup_config, target_config)) {
+        print("⚠️  Could not restore Docker config\n", .{});
         return;
-    };
+    }
 
     print("✅ Docker configuration restored\n", .{});
 }
@@ -735,7 +730,7 @@ fn restoreDockerConfig() !void {
 fn restorePodmanConfig() !void {
     var backup_containers_buf: [512]u8 = undefined;
     const backup_containers = try std.fmt.bufPrint(backup_containers_buf[0..], "{s}/.config/containers", .{BACKUP_PATH});
-    std.fs.cwd().access(backup_containers, .{}) catch {
+    if (!fs_compat.accessExists(backup_containers)) {
         print("⚠️  No Podman backup configuration found\n", .{});
         return;
     };
@@ -750,12 +745,10 @@ fn restorePodmanConfig() !void {
         const backup_path = try std.fmt.bufPrint(backup_path_buf[0..], "{s}/.config/containers/{s}", .{ BACKUP_PATH, config });
         const target_path = try std.fmt.bufPrint(target_path_buf[0..], ".config/containers/{s}", .{config});
 
-        std.fs.cwd().copyFile(backup_path, std.fs.cwd(), target_path, .{}) catch |err| {
-            if (err != error.FileNotFound) {
-                print("⚠️  Could not restore {s}: {}\n", .{ config, err });
-            }
+        if (!fs_compat.copyFileSpawn(std.heap.page_allocator, backup_path, target_path)) {
+                print("⚠️  Could not restore {s}\n", .{config});
             continue;
-        };
+        }
 
         print("✅ Restored {s}\n", .{config});
     }
@@ -792,24 +785,22 @@ fn createPodmanConfig() !void {
         \\
     ;
 
-    const file = std.fs.cwd().createFile(".config/containers/containers.conf", .{}) catch return;
-    defer file.close();
-
-    try file.writeAll(containers_conf);
+    fs_compat.writeFileAll(".config/containers/containers.conf", containers_conf) catch return;
     print("✅ Created containers.conf\n", .{});
 }
 
 fn backupExistingPostgresData() !void {
     const pg_data_dir = "/var/lib/postgres/data";
 
-    std.fs.cwd().access(pg_data_dir, .{}) catch return; // No existing data
+    if (!fs_compat.accessExists(pg_data_dir)) return;
 
-    // Check if directory has contents
-    var dir = std.fs.cwd().openDir(pg_data_dir, .{ .iterate = true }) catch return;
-    defer dir.close();
-
-    var iterator = dir.iterate();
-    const has_files = (try iterator.next()) != null;
+    // Check if directory has contents by trying to list it
+    const dir_entries = fs_compat.iterDir(std.heap.page_allocator, pg_data_dir) catch return;
+    defer {
+        for (dir_entries) |*e| e.deinit(std.heap.page_allocator);
+        std.heap.page_allocator.free(dir_entries);
+    }
+    const has_files = dir_entries.len > 0;
 
     if (has_files) {
         print("💾 Backing up existing PostgreSQL data...\n", .{});

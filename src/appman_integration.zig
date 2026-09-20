@@ -1,4 +1,5 @@
 const std = @import("std");
+const fs_compat = @import("fs_compat.zig");
 const print = std.debug.print;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -145,7 +146,7 @@ pub const AppManManager = struct {
         const term = child.wait() catch return AppManError.InstallationFailed;
 
         // Cleanup installer
-        std.fs.deleteFileAbsolute(temp_installer) catch {};
+        fs_compat.deleteFile(temp_installer) catch {};
 
         if (term.Exited != 0) {
             return AppManError.InstallationFailed;
@@ -425,10 +426,9 @@ pub const AppManManager = struct {
         const local_bin = try std.fmt.allocPrint(self.allocator, "{s}/.local/bin", .{home_dir});
         defer self.allocator.free(local_bin);
 
-        if (std.fs.openDirAbsolute(local_bin, .{})) |dir| {
-            dir.close();
+        if (fs_compat.accessExists(local_bin)) {
             print("✅ ~/.local/bin directory exists\n", .{});
-        } else |_| {
+        } else {
             print("⚠️  ~/.local/bin directory missing - will be created\n", .{});
         }
 

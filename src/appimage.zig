@@ -1,4 +1,5 @@
 const std = @import("std");
+const fs_compat = @import("fs_compat.zig");
 const print = std.debug.print;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -110,7 +111,7 @@ pub const AppImageInstaller = struct {
         };
 
         // Ensure install directory exists
-        std.fs.makeDirAbsolute(self.install_dir) catch |err| switch (err) {
+        fs_compat.makeDir(self.install_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => {
                 print("❌ Failed to create install directory: {}\n", .{err});
@@ -340,29 +341,28 @@ pub const AppImageInstaller = struct {
     pub fn listInstalled(self: *AppImageInstaller) !void {
         print("📦 Installed AppImages:\n", .{});
 
-        var install_dir = std.fs.openDirAbsolute(self.install_dir, .{ .iterate = true }) catch {
+        const entries = fs_compat.iterDir(self.allocator, self.install_dir) catch {
             print("  No AppImages installed (directory doesn't exist)\n", .{});
             return;
         };
-        defer install_dir.close();
+        defer {
+            for (entries) |*e| e.deinit(self.allocator);
+            self.allocator.free(entries);
+        }
 
-        var iterator = install_dir.iterate();
         var count: u32 = 0;
-
-        while (try iterator.next()) |entry| {
+        for (entries) |entry| {
             if (entry.kind == .file) {
-                // Check if file is executable
                 const file_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.install_dir, entry.name });
                 defer self.allocator.free(file_path);
 
-                const file = std.fs.openFileAbsolute(file_path, .{}) catch continue;
-                defer file.close();
-
-                const metadata = file.stat() catch continue;
-                const is_executable = (metadata.mode & 0o111) != 0;
+                const stat = std.posix.fstat(
+                    std.posix.openat(std.posix.AT.FDCWD, file_path, .{ .ACCMODE = .RDONLY }, 0) catch continue,
+                ) catch continue;
+                const is_executable = (stat.mode & 0o111) != 0;
 
                 if (is_executable) {
-                    const file_size = metadata.size;
+                    const file_size: u64 = @intCast(stat.size);
                     print("  ✅ {s} ({d} bytes)\n", .{ entry.name, file_size });
                     count += 1;
                 }
@@ -381,7 +381,7 @@ pub const AppImageInstaller = struct {
         const install_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.install_dir, binary_name });
         defer self.allocator.free(install_path);
 
-        std.fs.deleteFileAbsolute(install_path) catch |err| switch (err) {
+        fs_compat.deleteFile(install_path) catch |err| switch (err) {
             error.FileNotFound => {
                 print("❌ {s} is not installed\n", .{package_name});
                 return false;
