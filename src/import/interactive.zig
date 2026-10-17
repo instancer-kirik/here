@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 
 // Import from core modules
 const system = @import("../core/system.zig");
+const fs_compat = @import("../fs_compat.zig");
 const packages = @import("../core/packages.zig");
 const SystemInfo = system.SystemInfo;
 const PackageManager = system.PackageManager;
@@ -74,7 +75,7 @@ const InteractiveImporter = struct {
     fn getUserChoice() !u8 {
         // Use direct stdin reading for better reliability
         var buf: [256]u8 = undefined;
-        const stdin = std.fs.File.stdin();
+        const stdin = fs_compat.File.stdin();
 
         const bytes_read = stdin.read(buf[0..]) catch return error.NoInput;
         if (bytes_read == 0) return error.NoInput;
@@ -201,7 +202,7 @@ const InteractiveImporter = struct {
         print("\n⚠️  Continue with installation? [Y/n]: ", .{});
 
         var buf: [256]u8 = undefined;
-        const stdin = std.fs.File.stdin();
+        const stdin = fs_compat.File.stdin();
         const bytes_read = stdin.read(buf[0..]) catch return false;
 
         if (bytes_read == 0) return true; // Default to yes on empty input
@@ -230,7 +231,7 @@ const InteractiveImporter = struct {
         const cmd_parts = buildCommand(self.allocator, system_info, .install, &[_][]const u8{package_name}) catch return error.CommandBuildFailed;
         defer self.allocator.free(cmd_parts);
 
-        var child = std.process.Child.init(cmd_parts, self.allocator);
+        var child = fs_compat.Child.init(cmd_parts, self.allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -248,7 +249,7 @@ const InteractiveImporter = struct {
     }
 
     fn installFlatpakPackage(self: *Self, package_name: []const u8) !void {
-        var child = std.process.Child.init(&[_][]const u8{ "flatpak", "install", "--user", "-y", package_name }, self.allocator);
+        var child = fs_compat.Child.init(&[_][]const u8{ "flatpak", "install", "--user", "-y", package_name }, self.allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -329,7 +330,7 @@ const InteractiveImporter = struct {
         print("Selection: ", .{});
 
         var input_buf: [1024]u8 = undefined;
-        const stdin = std.fs.File.stdin();
+        const stdin = fs_compat.File.stdin();
         const bytes_read = stdin.read(input_buf[0..]) catch {
             print("Failed to read input, going back.\n", .{});
             return;
@@ -497,7 +498,7 @@ const InteractiveImporter = struct {
         print("Choice [1-2] (Enter = batch): ", .{});
 
         var method_buf: [256]u8 = undefined;
-        const stdin = std.fs.File.stdin();
+        const stdin = fs_compat.File.stdin();
         const method_read = stdin.read(method_buf[0..]) catch {
             print("Using batch install (default)\n", .{});
             try self.installSelectedPackagesBatch(package_list, selected_indices.items, section_type);
@@ -568,7 +569,7 @@ const InteractiveImporter = struct {
         }
         print("\n\n", .{});
 
-        var child = std.process.Child.init(cmd_parts, self.allocator);
+        var child = fs_compat.Child.init(cmd_parts, self.allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -592,7 +593,7 @@ const InteractiveImporter = struct {
                     print("Choice [1-3] (Enter = continue): ", .{});
 
                     var choice_buf: [256]u8 = undefined;
-                    const stdin = std.fs.File.stdin();
+                    const stdin = fs_compat.File.stdin();
                     const choice_read = stdin.read(choice_buf[0..]) catch {
                         print("Continuing with successful packages...\n", .{});
                         return;
@@ -628,7 +629,7 @@ const InteractiveImporter = struct {
             try cmd_args.append(self.allocator, pkg);
         }
 
-        var child = std.process.Child.init(cmd_args.items, self.allocator);
+        var child = fs_compat.Child.init(cmd_args.items, self.allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -658,7 +659,7 @@ const InteractiveImporter = struct {
         print("Continue? [y/N]: ", .{});
 
         var confirm_buf: [256]u8 = undefined;
-        const stdin = std.fs.File.stdin();
+        const stdin = fs_compat.File.stdin();
         const confirm_read = stdin.read(confirm_buf[0..]) catch return;
         const confirm_input = std.mem.trim(u8, confirm_buf[0..confirm_read], " \t\r\n");
 

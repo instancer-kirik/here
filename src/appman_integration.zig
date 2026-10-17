@@ -27,7 +27,7 @@ pub const AppManConfig = struct {
     config_dir: []const u8,
 
     pub fn init(allocator: Allocator) !AppManConfig {
-        const home_dir = std.posix.getenv("HOME") orelse return AppManError.PermissionDenied;
+        const home_dir = fs_compat.getenv("HOME") orelse return AppManError.PermissionDenied;
 
         return AppManConfig{
             .appman_path = try std.fmt.allocPrint(allocator, "{s}/.local/bin/appman", .{home_dir}),
@@ -82,7 +82,7 @@ pub const AppManManager = struct {
 
     /// Check if AppMan is installed and working
     pub fn isAppManInstalled(self: *AppManManager) bool {
-        const result = std.process.Child.run(.{
+        const result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ self.config.appman_path, "--version" },
         }) catch return false;
@@ -107,7 +107,7 @@ pub const AppManManager = struct {
         const temp_installer = "/tmp/AM-INSTALLER";
 
         // Download installer
-        const download_result = std.process.Child.run(.{
+        const download_result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "wget", "-q", installer_url, "-O", temp_installer },
         }) catch return AppManError.NetworkError;
@@ -120,7 +120,7 @@ pub const AppManManager = struct {
         }
 
         // Make executable
-        _ = std.process.Child.run(.{
+        _ = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "chmod", "+x", temp_installer },
         }) catch return AppManError.PermissionDenied;
@@ -129,7 +129,7 @@ pub const AppManManager = struct {
         print("💡 Auto-selecting AppMan option for local installation\n", .{});
 
         // Run installer with automated input (option 2 for AppMan)
-        var child = std.process.Child.init(&[_][]const u8{temp_installer}, self.allocator);
+        var child = fs_compat.Child.init(&[_][]const u8{temp_installer}, self.allocator);
         child.stdin_behavior = .Pipe;
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Pipe;
@@ -161,6 +161,48 @@ pub const AppManManager = struct {
         print("💡 You may need to restart your shell or run: source ~/.bashrc\n", .{});
     }
 
+    /// Read the local AppMan catalog without invoking the CLI.
+    /// Lines look like: `◆ openshot : A powerful Video Editor.`
+    pub fn searchCatalog(self: *AppManManager, query: []const u8) ![]AppInfo {
+        const home_dir = fs_compat.getenv("HOME") orelse return AppManError.DatabaseError;
+        const arch_file = switch (@import("builtin").cpu.arch) {
+            .aarch64 => "aarch64-apps",
+            else => "x86_64-apps",
+        };
+        const path = try std.fmt.allocPrint(self.allocator, "{s}/.local/share/AM/{s}", .{ home_dir, arch_file });
+        defer self.allocator.free(path);
+
+        const data = fs_compat.readFileAlloc(self.allocator, path, 8 * 1024 * 1024) catch {
+            return try self.allocator.alloc(AppInfo, 0);
+        };
+        defer self.allocator.free(data);
+
+        var results = ArrayList(AppInfo){ .items = &.{}, .capacity = 0 };
+        var lines = std.mem.splitScalar(u8, data, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t\r");
+            const marker = std.mem.indexOf(u8, trimmed, "◆") orelse continue;
+            const after = std.mem.trim(u8, trimmed[marker + "◆".len ..], " ");
+            const sep = std.mem.indexOf(u8, after, " : ") orelse continue;
+            const name = std.mem.trim(u8, after[0..sep], " ");
+            const description = std.mem.trim(u8, after[sep + 3 ..], " ");
+            if (name.len == 0) continue;
+            if (!containsIgnoreCase(name, query) and !containsIgnoreCase(description, query)) continue;
+
+            try results.append(self.allocator, AppInfo{
+                .name = try self.allocator.dupe(u8, name),
+                .version = try self.allocator.dupe(u8, ""),
+                .description = try self.allocator.dupe(u8, description),
+                .category = try self.allocator.dupe(u8, ""),
+                .website = try self.allocator.dupe(u8, ""),
+                .size = 0,
+                .installed = false,
+            });
+        }
+
+        return results.toOwnedSlice(self.allocator);
+    }
+
     /// Search for applications in AppMan database
     pub fn search(self: *AppManManager, query: []const u8) ![]AppInfo {
         if (!self.isAppManInstalled()) {
@@ -169,7 +211,7 @@ pub const AppManManager = struct {
 
         print("🔍 Searching AppMan database for '{s}'...\n", .{query});
 
-        const result = std.process.Child.run(.{
+        const result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ self.config.appman_path, "-q", query },
         }) catch return AppManError.DatabaseError;
@@ -192,7 +234,7 @@ pub const AppManManager = struct {
 
         print("📦 Installing {s} via AppMan...\n", .{app_name});
 
-        var child = std.process.Child.init(&[_][]const u8{ self.config.appman_path, "-i", app_name }, self.allocator);
+        var child = fs_compat.Child.init(&[_][]const u8{ self.config.appman_path, "-i", app_name }, self.allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -220,7 +262,7 @@ pub const AppManManager = struct {
 
         print("🔄 Updating all AppMan applications...\n", .{});
 
-        var child = std.process.Child.init(&[_][]const u8{ self.config.appman_path, "-u" }, self.allocator);
+        var child = fs_compat.Child.init(&[_][]const u8{ self.config.appman_path, "-u" }, self.allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -247,7 +289,7 @@ pub const AppManManager = struct {
 
         print("🗑️  Removing {s}...\n", .{app_name});
 
-        var child = std.process.Child.init(&[_][]const u8{ self.config.appman_path, "-r", app_name }, self.allocator);
+        var child = fs_compat.Child.init(&[_][]const u8{ self.config.appman_path, "-r", app_name }, self.allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -275,7 +317,7 @@ pub const AppManManager = struct {
 
         print("📋 AppMan installed applications:\n", .{});
 
-        var child = std.process.Child.init(&[_][]const u8{ self.config.appman_path, "-f" }, self.allocator);
+        var child = fs_compat.Child.init(&[_][]const u8{ self.config.appman_path, "-f" }, self.allocator);
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
 
@@ -290,7 +332,7 @@ pub const AppManManager = struct {
             return null;
         }
 
-        const result = std.process.Child.run(.{
+        const result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ self.config.appman_path, "-a", app_name },
         }) catch return null;
@@ -313,7 +355,7 @@ pub const AppManManager = struct {
 
         print("🔄 Updating AppMan database...\n", .{});
 
-        const result = std.process.Child.run(.{
+        const result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ self.config.appman_path, "--sync" },
         }) catch return AppManError.DatabaseError;
@@ -336,7 +378,7 @@ pub const AppManManager = struct {
 
         print("🔒 Enabling sandbox for {s}...\n", .{app_name});
 
-        const result = std.process.Child.run(.{
+        const result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ self.config.appman_path, "--sandbox", app_name },
         }) catch return AppManError.InstallationFailed;
@@ -350,6 +392,15 @@ pub const AppManManager = struct {
             print("⚠️  Sandboxing not supported for {s}\n", .{app_name});
         }
     }
+
+fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0 or haystack.len < needle.len) return false;
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(haystack[i..][0..needle.len], needle)) return true;
+    }
+    return false;
+}
 
     /// Private helper functions
     fn parseSearchResults(self: *AppManManager, output: []const u8) ![]AppInfo {
@@ -418,7 +469,7 @@ pub const AppManManager = struct {
         }
 
         // Check directory structure
-        const home_dir = std.posix.getenv("HOME") orelse {
+        const home_dir = fs_compat.getenv("HOME") orelse {
             print("❌ HOME environment variable not set\n", .{});
             return AppManError.PermissionDenied;
         };
@@ -433,7 +484,7 @@ pub const AppManManager = struct {
         }
 
         // Check PATH configuration
-        const path_env = std.posix.getenv("PATH") orelse "";
+        const path_env = fs_compat.getenv("PATH") orelse "";
         if (std.mem.indexOf(u8, path_env, local_bin) != null) {
             print("✅ ~/.local/bin is in PATH\n", .{});
         } else {
@@ -441,7 +492,7 @@ pub const AppManManager = struct {
         }
 
         // Check network connectivity for updates
-        const ping_result = std.process.Child.run(.{
+        const ping_result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "ping", "-c", "1", "-W", "3", "github.com" },
         }) catch {
@@ -461,7 +512,7 @@ pub const AppManManager = struct {
         // Check dependencies
         const deps = [_][]const u8{ "curl", "wget", "grep", "sed", "chmod" };
         for (deps) |dep| {
-            const check_result = std.process.Child.run(.{
+            const check_result = fs_compat.Child.run(.{
                 .allocator = self.allocator,
                 .argv = &[_][]const u8{ "which", dep },
             }) catch continue;

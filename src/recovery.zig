@@ -81,7 +81,7 @@ const ProgressTracker = struct {
         return ProgressTracker{
             .total_steps = total_steps,
             .total_bytes = total_bytes,
-            .start_time = std.time.timestamp(),
+            .start_time = fs_compat.timestamp(),
         };
     }
 
@@ -97,7 +97,7 @@ const ProgressTracker = struct {
     }
 
     fn printProgress(self: *ProgressTracker) void {
-        const elapsed = std.time.timestamp() - self.start_time;
+        const elapsed = fs_compat.timestamp() - self.start_time;
         const percent_steps = if (self.total_steps > 0) (self.current_step * 100) / self.total_steps else 0;
         _ = self.total_bytes; // Suppress unused warning for now
 
@@ -123,7 +123,7 @@ const DetectedDatabase = struct {
 };
 
 fn detectDatabases(allocator: std.mem.Allocator) ![]DetectedDatabase {
-    var databases = std.ArrayList(DetectedDatabase){};
+    var databases = std.ArrayList(DetectedDatabase){ .items = &.{}, .capacity = 0 };
     defer databases.deinit(allocator);
 
     // Check for PostgreSQL
@@ -176,7 +176,7 @@ fn detectPostgreSQLVersion(allocator: std.mem.Allocator, data_path: []const u8) 
 }
 
 fn getDirSize(path: []const u8) !u64 {
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = std.heap.page_allocator,
         .argv = &[_][]const u8{ "du", "-sb", path },
         .cwd = null,
@@ -378,21 +378,21 @@ fn runCustomSelection(allocator: std.mem.Allocator) !void {
 
     // PostgreSQL
     print("Recover PostgreSQL/PostGIS? [y/N]: ", .{});
-    const postgres_bytes = stdin.read(buffer[0..]) catch 0;
+    const postgres_bytes = std.posix.read(std.posix.STDIN_FILENO, buffer[0..]) catch 0;
     const postgres_input = if (postgres_bytes > 0) buffer[0..postgres_bytes] else "";
     const recover_postgresql = std.mem.startsWith(u8, std.mem.trim(u8, postgres_input, " \t\r\n"), "y") or
         std.mem.startsWith(u8, std.mem.trim(u8, postgres_input, " \t\r\n"), "Y");
 
     // AppMan
     print("Recover AppMan/AppImage? [y/N]: ", .{});
-    const appman_bytes = stdin.read(buffer[0..]) catch 0;
+    const appman_bytes = std.posix.read(std.posix.STDIN_FILENO, buffer[0..]) catch 0;
     const appman_input = if (appman_bytes > 0) buffer[0..appman_bytes] else "";
     const recover_appman = std.mem.startsWith(u8, std.mem.trim(u8, appman_input, " \t\r\n"), "y") or
         std.mem.startsWith(u8, std.mem.trim(u8, appman_input, " \t\r\n"), "Y");
 
     // Nix
     print("Recover Nix Profile? [y/N]: ", .{});
-    const nix_bytes = stdin.read(buffer[0..]) catch 0;
+    const nix_bytes = std.posix.read(std.posix.STDIN_FILENO, buffer[0..]) catch 0;
     const nix_input = if (nix_bytes > 0) buffer[0..nix_bytes] else "";
     const recover_nix = std.mem.startsWith(u8, std.mem.trim(u8, nix_input, " \t\r\n"), "y") or
         std.mem.startsWith(u8, std.mem.trim(u8, nix_input, " \t\r\n"), "Y");
@@ -406,7 +406,7 @@ fn runCustomSelection(allocator: std.mem.Allocator) !void {
     print("\n", .{});
 
     print("Proceed with recovery? [y/N]: ", .{});
-    const proceed_bytes = stdin.read(buffer[0..]) catch 0;
+    const proceed_bytes = std.posix.read(std.posix.STDIN_FILENO, buffer[0..]) catch 0;
     const proceed_input = if (proceed_bytes > 0) buffer[0..proceed_bytes] else "";
     const proceed = std.mem.startsWith(u8, std.mem.trim(u8, proceed_input, " \t\r\n"), "y") or
         std.mem.startsWith(u8, std.mem.trim(u8, proceed_input, " \t\r\n"), "Y");
@@ -442,7 +442,7 @@ fn recoverDocker(allocator: std.mem.Allocator) !void {
 
     // Add user to docker group
     print("👤 Adding user to docker group...\n", .{});
-    const user = std.process.getEnvVarOwned(allocator, "USER") catch "bon";
+    const user = fs_compat.getEnvVarOwned(allocator, "USER") catch "bon";
     defer allocator.free(user);
 
     const usermod_args = [_][]const u8{ "sudo", "usermod", "-aG", "docker", user };
@@ -495,7 +495,7 @@ fn recoverPostgreSQL(allocator: std.mem.Allocator) !void {
     if (!fs_compat.accessExists(pg_backup_path)) {
         print("❌ PostgreSQL backup data not found: {s}\n", .{pg_backup_path});
         return RecoveryError.BackupNotFound;
-    };
+    }
 
     // Read PostgreSQL version from backup
     var version_file_buf: [512]u8 = undefined;
@@ -546,7 +546,7 @@ fn recoverPostgreSQL(allocator: std.mem.Allocator) !void {
 
     // Wait for service to start
     print("⏳ Waiting for PostgreSQL to start...\n", .{});
-    std.Thread.sleep(5 * std.time.ns_per_s);
+    fs_compat.sleep(5 * std.time.ns_per_s);
 
     // Test connection
     print("🔗 Testing PostgreSQL connection...\n", .{});
@@ -573,7 +573,7 @@ fn recoverAppMan(allocator: std.mem.Allocator) !void {
         print("💡 Installing fresh AppMan instead...\n", .{});
         try installFreshAppMan(allocator);
         return;
-    };
+    }
 
     // Restore AppMan installation
     try restoreAppManInstallation();
@@ -587,9 +587,9 @@ fn recoverAppMan(allocator: std.mem.Allocator) !void {
 
     try createDirectoryIfNotExists(".local/bin");
     if (!fs_compat.copyFileSpawn(allocator, appman_bin_backup, ".local/bin/appman")) {
-        print("❌ Failed to restore AppMan binary: {}\n", .{err});
+        print("❌ Failed to restore AppMan binary\n", .{});
         return;
-    };
+    }
 
     // Make AppMan executable
     try runCommand(&[_][]const u8{ "chmod", "+x", ".local/bin/appman" });
@@ -689,7 +689,7 @@ fn restoreNixProfile() !void {
 }
 
 fn runCommand(args: []const []const u8) !void {
-    var child = std.process.Child.init(args, std.heap.page_allocator);
+    var child = fs_compat.Child.init(args, std.heap.page_allocator);
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
@@ -733,7 +733,7 @@ fn restorePodmanConfig() !void {
     if (!fs_compat.accessExists(backup_containers)) {
         print("⚠️  No Podman backup configuration found\n", .{});
         return;
-    };
+    }
 
     // Copy configuration files if they exist
     const configs = [_][]const u8{ "containers.conf", "storage.conf", "registries.conf" };
@@ -755,7 +755,7 @@ fn restorePodmanConfig() !void {
 }
 
 fn configurePodmanNamespaces(allocator: std.mem.Allocator) !void {
-    const user = std.process.getEnvVarOwned(allocator, "USER") catch "bon";
+    const user = fs_compat.getEnvVarOwned(allocator, "USER") catch "bon";
     defer allocator.free(user);
 
     print("🔧 Configuring user namespaces...\n", .{});
@@ -804,7 +804,7 @@ fn backupExistingPostgresData() !void {
 
     if (has_files) {
         print("💾 Backing up existing PostgreSQL data...\n", .{});
-        const timestamp = std.time.timestamp();
+        const timestamp = fs_compat.timestamp();
         const backup_name = try std.fmt.allocPrint(std.heap.page_allocator, "/var/lib/postgres/data.backup_{}", .{timestamp});
         defer std.heap.page_allocator.free(backup_name);
 
@@ -834,7 +834,7 @@ fn restorePostgreSQLData() !void {
 }
 
 fn getCurrentPostgreSQLVersion(allocator: std.mem.Allocator) ![]u8 {
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ "postgres", "--version" },
         .cwd = null,
@@ -906,7 +906,7 @@ fn performPodmanBasedRestore(backup_version: []const u8, _: []const u8) !void {
 
     // Direct file system check first - use sudo to read postgres-owned files
     print("🔍 Reading backup version file...\n", .{});
-    const backup_version_result = std.process.Child.run(.{
+    const backup_version_result = fs_compat.Child.run(.{
         .allocator = std.heap.page_allocator,
         .argv = &[_][]const u8{ "sudo", "cat", "/var/lib/postgres/data_old/PG_VERSION" },
         .cwd = null,

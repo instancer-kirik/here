@@ -16,6 +16,7 @@ const cli = @import("core/cli.zig");
 const packages = @import("core/packages.zig");
 const profiles = @import("core/profiles.zig");
 const audit = @import("audit.zig");
+const fs_compat = @import("fs_compat.zig");
 
 // Type aliases for compatibility
 const SystemInfo = system.SystemInfo;
@@ -147,7 +148,7 @@ fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config: bo
     }
 
     // Get current timestamp
-    const timestamp = std.time.timestamp();
+    const timestamp = fs_compat.timestamp();
     const date_str = try std.fmt.allocPrint(allocator, "{d}", .{timestamp});
     defer allocator.free(date_str);
 
@@ -160,7 +161,7 @@ fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config: bo
     defer allocator.free(system_info.package_sources);
 
     // Get system details
-    const uname_result = std.process.Child.run(.{
+    const uname_result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ "uname", "-m" },
     }) catch {
@@ -172,7 +173,7 @@ fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config: bo
 
     const arch = std.mem.trim(u8, uname_result.stdout, " \n\r\t");
 
-    const kernel_result = std.process.Child.run(.{
+    const kernel_result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ "uname", "-r" },
     }) catch {
@@ -228,9 +229,9 @@ fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config: bo
 
     if (include_config) {
         // Get home directory
-        const home_dir_path = std.process.getEnvVarOwned(allocator, "HOME") catch "/tmp";
+        const home_dir_path = fs_compat.getEnvVarOwned(allocator, "HOME") catch "/tmp";
         defer if (!std.mem.eql(u8, home_dir_path, "/tmp")) allocator.free(home_dir_path);
-        var home_dir = std.fs.openDirAbsolute(home_dir_path, .{}) catch {
+        var home_dir = fs_compat.openDirAbsolute(home_dir_path, .{}) catch {
             print("⚠️  Could not access home directory\n", .{});
             return;
         };
@@ -293,7 +294,7 @@ fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config: bo
     }
 
     // Create profile JSON manually (simple approach)
-    const profile_file = std.fs.cwd().createFile(profile_name, .{}) catch |err| {
+    const profile_file = fs_compat.cwd().createFile(profile_name, .{}) catch |err| {
         print("❌ Failed to create profile file: {}\n", .{err});
         return;
     };
@@ -420,7 +421,7 @@ fn collectNativePackages(allocator: Allocator, system_info: SystemInfo, package_
         else => return,
     };
 
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = cmd,
     }) catch return;
@@ -457,7 +458,7 @@ fn collectNativePackages(allocator: Allocator, system_info: SystemInfo, package_
 }
 
 fn collectFlatpakPackages(allocator: Allocator, package_list: *std.ArrayList([]const u8)) !void {
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ "flatpak", "list", "--app", "--columns=application" },
     }) catch return;
@@ -485,7 +486,7 @@ fn collectAppImagePackages(allocator: Allocator, package_list: *std.ArrayList([]
     };
     defer appman_manager.deinit();
 
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ appman_manager.config.appman_path, "-f" },
     }) catch {
@@ -519,7 +520,7 @@ fn collectAppImagePackages(allocator: Allocator, package_list: *std.ArrayList([]
 }
 
 fn collectAppImageFromFilesystem(allocator: Allocator, package_list: *std.ArrayList([]const u8)) !void {
-    const home_dir = std.posix.getenv("HOME") orelse return;
+    const home_dir = fs_compat.getenv("HOME") orelse return;
 
     // Common AppImage locations
     const search_paths = [_][]const u8{
@@ -544,7 +545,7 @@ fn collectAppImageFromFilesystem(allocator: Allocator, package_list: *std.ArrayL
 }
 
 fn scanDirectoryForAppImages(allocator: Allocator, dir_path: []const u8, package_list: *std.ArrayList([]const u8)) !void {
-    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return;
+    var dir = fs_compat.openDirAbsolute(dir_path, .{ .iterate = true }) catch return;
     defer dir.close();
 
     var iterator = dir.iterate();
@@ -579,7 +580,7 @@ fn scanDirectoryForAppImages(allocator: Allocator, dir_path: []const u8, package
 fn restoreProfile(allocator: Allocator, filename: []const u8) !void {
     print("📥 Restoring package profile from '{s}'...\n", .{filename});
 
-    const profile_file = std.fs.cwd().openFile(filename, .{}) catch |err| {
+    const profile_file = fs_compat.cwd().openFile(filename, .{}) catch |err| {
         print("❌ Failed to open profile file: {}\n", .{err});
         return;
     };
@@ -617,7 +618,7 @@ fn restoreProfile(allocator: Allocator, filename: []const u8) !void {
 fn importProfile(allocator: Allocator, filename: []const u8) !void {
     print("📥 Importing package profile from '{s}'...\n", .{filename});
 
-    const profile_file = std.fs.cwd().openFile(filename, .{}) catch |err| {
+    const profile_file = fs_compat.cwd().openFile(filename, .{}) catch |err| {
         print("❌ Failed to open profile file: {}\n", .{err});
         return;
     };
@@ -689,6 +690,575 @@ fn importProfile(allocator: Allocator, filename: []const u8) !void {
     print("✅ Profile analysis complete!\n", .{});
 }
 
+fn useColor() bool {
+    if (fs_compat.getenv("NO_COLOR") != null) return false;
+    var wsz: std.posix.winsize = undefined;
+    const rc = std.os.linux.syscall3(.ioctl, 2, std.os.linux.T.IOCGWINSZ, @intFromPtr(&wsz));
+    return std.os.linux.errno(rc) == .SUCCESS;
+}
+
+/// Same djb2 mix yay uses so `aur`, `extra`, and `cachyos-extra-v3` pick up
+/// the colors a yay menu would.
+fn yayColorHash(name: []const u8) u8 {
+    var hash: u64 = 5381;
+    for (name) |byte| {
+        hash = @as(u64, byte) +% ((hash << 5) +% hash);
+    }
+    return @intCast((hash % 6) + 31);
+}
+
+fn printMenuEntry(number: usize, pkg: packages.PackageMatch) void {
+    if (useColor()) {
+        print("\x1b[35m{d}\x1b[0m ", .{number});
+    } else {
+        print("{d} ", .{number});
+    }
+    printColoredPackage(pkg.id);
+    print("\n", .{});
+    if (pkg.description.len > 0) print("    {s}\n", .{pkg.description});
+}
+
+fn printColoredPackage(id: []const u8) void {
+    const slash = std.mem.indexOfScalar(u8, id, '/') orelse {
+        print("{s}", .{id});
+        return;
+    };
+    const repo = id[0..slash];
+    const rest = id[slash + 1 ..];
+    const name_end = std.mem.indexOfScalar(u8, rest, ' ') orelse rest.len;
+    const name = rest[0..name_end];
+    const meta = std.mem.trim(u8, if (name_end < rest.len) rest[name_end + 1 ..] else "", " ");
+
+    if (!useColor()) {
+        print("{s}/{s}", .{ repo, name });
+        if (meta.len > 0) print(" {s}", .{meta});
+        return;
+    }
+
+    print("\x1b[1m\x1b[{d}m{s}\x1b[0m/\x1b[1m{s}\x1b[0m", .{ yayColorHash(repo), repo, name });
+    if (meta.len > 0) {
+        print(" ", .{});
+        printColoredMeta(meta);
+    }
+}
+
+fn printColoredMeta(meta: []const u8) void {
+    var i: usize = 0;
+    var first_token = true;
+    while (i < meta.len) {
+        while (i < meta.len and meta[i] == ' ') : (i += 1) {}
+        if (i >= meta.len) break;
+        if (!first_token) print(" ", .{});
+
+        if (meta[i] == '(' or meta[i] == '[') {
+            const close: u8 = if (meta[i] == '(') ')' else ']';
+            const end = std.mem.indexOfScalarPos(u8, meta, i, close) orelse meta.len - 1;
+            const group = meta[i .. @min(end + 1, meta.len)];
+            printColoredGroup(group);
+            i = @min(end + 1, meta.len);
+        } else {
+            const start = i;
+            while (i < meta.len and meta[i] != ' ') : (i += 1) {}
+            const token = meta[start..i];
+            if (first_token) {
+                print("\x1b[36m{s}\x1b[0m", .{token});
+            } else {
+                print("{s}", .{token});
+            }
+        }
+        first_token = false;
+    }
+}
+
+fn printColoredGroup(group: []const u8) void {
+    if (std.mem.indexOf(u8, group, "Installed") != null) {
+        print("\x1b[1m\x1b[32m{s}\x1b[0m", .{group});
+    } else if (std.mem.indexOf(u8, group, "Orphaned") != null or std.mem.indexOf(u8, group, "Out-of-date") != null) {
+        print("\x1b[1m\x1b[31m{s}\x1b[0m", .{group});
+    } else if (group.len > 0 and group[0] == '[') {
+        print("{s}{s}\x1b[0m", .{ ageColor(group), group });
+    } else {
+        print("\x1b[1m{s}\x1b[0m", .{group});
+    }
+}
+
+fn ageColor(tag: []const u8) []const u8 {
+    // yay: < 1 day red, < 7 days yellow, otherwise cyan.
+    const body = std.mem.trim(u8, tag, "[]");
+    const days = parseLeadingInt(body);
+    if (std.mem.indexOfScalar(u8, body, 'd') == null) return "\x1b[1m\x1b[31m";
+    if (days < 7) return "\x1b[1m\x1b[33m";
+    return "\x1b[36m";
+}
+
+fn parseLeadingInt(text: []const u8) usize {
+    var n: usize = 0;
+    for (text) |c| {
+        if (c < '0' or c > '9') break;
+        n = n * 10 + (c - '0');
+    }
+    return n;
+}
+
+fn hasSource(system_info: SystemInfo, wanted: PackageSource) bool {
+    for (system_info.package_sources) |source| {
+        if (source == wanted) return true;
+    }
+    return false;
+}
+
+fn selectAndInstall(allocator: Allocator, system_info: SystemInfo, query: []const u8) void {
+    var matches = ArrayList(packages.PackageMatch){ .items = &.{}, .capacity = 0 };
+    defer {
+        for (matches.items) |pkg| {
+            allocator.free(pkg.name);
+            allocator.free(pkg.id);
+            allocator.free(pkg.description);
+        }
+        matches.deinit(allocator);
+    }
+
+    if (system_info.package_manager == .yay or system_info.package_manager == .paru or system_info.package_manager == .pacman) {
+        const native = packages.searchNativePackages(allocator, system_info, query) catch packages.SearchResult{ .packages = &.{}, .total_count = 0 };
+        if (native.packages.len > 0) {
+            defer allocator.free(native.packages);
+            for (native.packages) |pkg| matches.append(allocator, pkg) catch {};
+        }
+    }
+
+    if (hasSource(system_info, .appimage)) {
+        var appman_manager = appman.AppManManager.init(allocator) catch null;
+        if (appman_manager) |*manager| {
+            defer manager.deinit();
+            const apps = manager.searchCatalog(query) catch null;
+            if (apps) |found| {
+                defer allocator.free(found);
+                for (found) |app| {
+                    const id = std.fmt.allocPrint(allocator, "appimage/{s}", .{app.name}) catch {
+                        app.deinit(allocator);
+                        continue;
+                    };
+                    matches.append(allocator, .{
+                        .name = app.name,
+                        .source = .appimage,
+                        .id = id,
+                        .description = app.description,
+                    }) catch {
+                        allocator.free(id);
+                        app.deinit(allocator);
+                        continue;
+                    };
+                    allocator.free(app.version);
+                    allocator.free(app.category);
+                    allocator.free(app.website);
+                }
+            }
+        }
+    }
+
+    if (hasSource(system_info, .flatpak)) {
+        collectFlatpakMatches(allocator, query, &matches) catch {};
+    }
+
+    annotateInstallState(allocator, &matches);
+
+    if (matches.items.len == 0) {
+        print("\n❌ No packages found for '{s}'\n", .{query});
+        return;
+    }
+
+    // Flatpak, then AppImage, then native. Native stays in yay's order, so the
+    // closest match is last and prints as 1, the same way yay numbers a menu.
+    var ordered = ArrayList(packages.PackageMatch){ .items = &.{}, .capacity = 0 };
+    defer ordered.deinit(allocator);
+    const source_order = [_]PackageSource{ .flatpak, .appimage, .native, .snap };
+    for (source_order) |source| {
+        for (matches.items) |pkg| {
+            if (pkg.source == source) ordered.append(allocator, pkg) catch {};
+        }
+    }
+
+    print("\n", .{});
+    for (ordered.items, 0..) |pkg, i| {
+        printMenuEntry(ordered.items.len - i, pkg);
+    }
+
+    print("\n==> Packages to install (eg: 1 2 3, 1-3 or ^4)\n==> ", .{});
+    var buf: [256]u8 = undefined;
+    const stdin = fs_compat.File.stdin();
+    const bytes_read = stdin.read(buf[0..]) catch {
+        print("⏹️  Installation cancelled.\n", .{});
+        return;
+    };
+    if (bytes_read == 0) {
+        print("⏹️  Installation cancelled.\n", .{});
+        return;
+    }
+
+    const trimmed = std.mem.trim(u8, buf[0..bytes_read], " \t\r\n");
+    if (trimmed.len == 0) {
+        print("⏹️  Installation cancelled.\n", .{});
+        return;
+    }
+
+    const indices = packages.parseSelectionIndices(allocator, trimmed, matches.items.len) catch {
+        print("❌ No valid packages selected\n", .{});
+        return;
+    };
+    defer allocator.free(indices);
+    if (indices.len == 0) {
+        print("❌ No valid packages selected\n", .{});
+        return;
+    }
+
+    print("\n🚀 Installing {d} packages...\n", .{indices.len});
+    for (indices) |idx| {
+        if (idx == 0 or idx > ordered.items.len) continue;
+        installMatch(allocator, system_info, ordered.items[ordered.items.len - idx]);
+    }
+}
+
+fn installMatch(allocator: Allocator, system_info: SystemInfo, pkg: packages.PackageMatch) void {
+    print("Installing {s} ({s})...\n", .{ pkg.name, pkg.source.toString() });
+    switch (pkg.source) {
+        .native => {
+            const cmd_parts = packages.buildCommand(allocator, system_info, .install, &[_][]const u8{pkg.name}) catch |err| {
+                print("❌ Failed to install {s}: {}\n", .{ pkg.name, err });
+                return;
+            };
+            defer allocator.free(cmd_parts);
+
+            var child = fs_compat.Child.init(cmd_parts, allocator);
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            const term = child.spawnAndWait() catch |err| {
+                print("❌ Failed to install {s}: {}\n", .{ pkg.name, err });
+                return;
+            };
+            const exit_code = switch (term) {
+                .Exited => |code| code,
+                else => 1,
+            };
+            if (exit_code != 0) {
+                packages.retryInstallWithOverwrite(allocator, system_info, pkg.name) catch {};
+            }
+        },
+        .appimage => {
+            if (!(installAppImage(allocator, pkg.name) catch false)) {
+                print("❌ AppImage install failed for {s}\n", .{pkg.name});
+            }
+        },
+        .flatpak => {
+            if (installFlatpak(allocator, pkg.name) catch false) {
+                print("✅ Installed via Flatpak\n", .{});
+            } else {
+                print("❌ Flatpak install failed for {s}\n", .{pkg.name});
+            }
+        },
+        .snap => print("❌ Snap install from this menu is not supported for {s}\n", .{pkg.name}),
+    }
+}
+
+const LocalInstall = struct {
+    version: []const u8,
+    /// Sync repo such as `extra` or `cachyos-extra-v3`. Empty for a foreign package.
+    origin: []const u8,
+};
+
+fn annotateInstallState(allocator: Allocator, matches: *ArrayList(packages.PackageMatch)) void {
+    const native = loadNativeInstalls(allocator, matches.items) catch null;
+    defer if (native) |found| {
+        var it = found.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            allocator.free(entry.value_ptr.version);
+            allocator.free(entry.value_ptr.origin);
+        }
+        var map = found;
+        map.deinit();
+    };
+
+    const flatpaks = loadFlatpakInstalls(allocator) catch null;
+    defer if (flatpaks) |found| {
+        var it = found.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            allocator.free(entry.value_ptr.version);
+            allocator.free(entry.value_ptr.origin);
+        }
+        var map = found;
+        map.deinit();
+    };
+
+    for (matches.items) |*pkg| {
+        const note: ?[]const u8 = switch (pkg.source) {
+            .native => if (native) |map| installedNote(allocator, pkg.id, map.get(pkg.name)) catch null else null,
+            .flatpak => if (flatpaks) |map| installedNote(allocator, pkg.id, map.get(pkg.name)) catch null else null,
+            .appimage => if (appImageInstalled(pkg.name)) allocator.dupe(u8, " (Installed)") catch null else null,
+            .snap => null,
+        };
+        const suffix = note orelse continue;
+        defer allocator.free(suffix);
+
+        const base = withoutInstalledNote(pkg.id);
+        const updated = std.fmt.allocPrint(allocator, "{s}{s}", .{ base, suffix }) catch continue;
+        allocator.free(pkg.id);
+        pkg.id = updated;
+    }
+}
+
+fn installedNote(allocator: Allocator, id: []const u8, local: ?LocalInstall) !?[]const u8 {
+    const installed = local orelse return null;
+    const offered = rowVersion(id);
+    const row_repo = rowRepo(id);
+    const same_version = offered.len > 0 and std.mem.eql(u8, offered, installed.version);
+    const same_origin = installed.origin.len == 0 or std.mem.eql(u8, installed.origin, row_repo);
+
+    if (same_version and same_origin) return try allocator.dupe(u8, " (Installed)");
+    if (installed.origin.len > 0 and !same_origin) {
+        return try std.fmt.allocPrint(allocator, " (Installed: {s} {s})", .{ installed.version, installed.origin });
+    }
+    if (!same_version and installed.version.len > 0) {
+        return try std.fmt.allocPrint(allocator, " (Installed: {s})", .{installed.version});
+    }
+    return try allocator.dupe(u8, " (Installed)");
+}
+
+fn rowRepo(id: []const u8) []const u8 {
+    const slash = std.mem.indexOfScalar(u8, id, '/') orelse return "";
+    return id[0..slash];
+}
+
+fn rowVersion(id: []const u8) []const u8 {
+    const slash = std.mem.indexOfScalar(u8, id, '/') orelse return "";
+    const rest = id[slash + 1 ..];
+    const name_end = std.mem.indexOfScalar(u8, rest, ' ') orelse return "";
+    const meta = std.mem.trim(u8, rest[name_end + 1 ..], " ");
+    if (meta.len == 0 or meta[0] == '(' or meta[0] == '[') return "";
+    const token_end = std.mem.indexOfScalar(u8, meta, ' ') orelse meta.len;
+    return meta[0..token_end];
+}
+
+fn withoutInstalledNote(id: []const u8) []const u8 {
+    const pos = std.mem.indexOf(u8, id, " (Installed") orelse return id;
+    return std.mem.trim(u8, id[0..pos], " ");
+}
+
+fn appImageInstalled(name: []const u8) bool {
+    const home = fs_compat.getenv("HOME") orelse return false;
+    const bin = std.fmt.allocPrint(std.heap.page_allocator, "{s}/.local/bin/{s}", .{ home, name }) catch return false;
+    defer std.heap.page_allocator.free(bin);
+    if (fs_compat.accessExists(bin)) return true;
+    const app = std.fmt.allocPrint(std.heap.page_allocator, "{s}/Applications/{s}", .{ home, name }) catch return false;
+    defer std.heap.page_allocator.free(app);
+    return fs_compat.accessExists(app);
+}
+
+fn loadNativeInstalls(allocator: Allocator, matches: []const packages.PackageMatch) !std.StringHashMap(LocalInstall) {
+    var map = std.StringHashMap(LocalInstall).init(allocator);
+    const listed = runCapture(allocator, &.{ "pacman", "-Q" }) orelse return map;
+    defer allocator.free(listed);
+
+    var names = ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
+    defer names.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, listed, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+        const space = std.mem.indexOfScalar(u8, trimmed, ' ') orelse continue;
+        const name = trimmed[0..space];
+        if (!menuWantsNative(matches, name)) continue;
+        const version = std.mem.trim(u8, trimmed[space + 1 ..], " ");
+        try map.put(try allocator.dupe(u8, name), .{
+            .version = try allocator.dupe(u8, version),
+            .origin = try allocator.dupe(u8, ""),
+        });
+        try names.append(allocator, name);
+    }
+
+    if (names.items.len == 0) return map;
+
+    var argv = ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
+    defer argv.deinit(allocator);
+    try argv.append(allocator, "pacman");
+    try argv.append(allocator, "-Qi");
+    for (names.items) |name| try argv.append(allocator, name);
+
+    const info = runCapture(allocator, argv.items) orelse return map;
+    defer allocator.free(info);
+
+    var current_name: ?[]const u8 = null;
+    var info_lines = std.mem.splitScalar(u8, info, '\n');
+    while (info_lines.next()) |line| {
+        const name = fieldValue(line, "Name") orelse null;
+        if (name) |pkg_name| {
+            current_name = pkg_name;
+            continue;
+        }
+        const origin = fieldValue(line, "Installed From") orelse continue;
+        const key = current_name orelse continue;
+        if (map.getPtr(key)) |entry| {
+            if (!std.mem.eql(u8, origin, "None")) {
+                allocator.free(entry.origin);
+                entry.origin = allocator.dupe(u8, origin) catch entry.origin;
+            }
+        }
+    }
+
+    return map;
+}
+
+fn loadFlatpakInstalls(allocator: Allocator) !std.StringHashMap(LocalInstall) {
+    var map = std.StringHashMap(LocalInstall).init(allocator);
+    const listed = runCapture(allocator, &.{ "flatpak", "list", "--app", "--columns=application,version,origin" }) orelse return map;
+    defer allocator.free(listed);
+
+    var lines = std.mem.splitScalar(u8, listed, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        var parts = std.mem.splitScalar(u8, line, '\t');
+        const application = std.mem.trim(u8, parts.next() orelse continue, " \t\r");
+        const version = std.mem.trim(u8, parts.next() orelse "", " \t\r");
+        const origin = std.mem.trim(u8, parts.next() orelse "", " \t\r");
+        if (application.len == 0) continue;
+        try map.put(try allocator.dupe(u8, application), .{
+            .version = try allocator.dupe(u8, version),
+            .origin = try allocator.dupe(u8, origin),
+        });
+    }
+    return map;
+}
+
+fn menuWantsNative(matches: []const packages.PackageMatch, name: []const u8) bool {
+    for (matches) |pkg| {
+        if (pkg.source == .native and std.mem.eql(u8, pkg.name, name)) return true;
+    }
+    return false;
+}
+
+fn fieldValue(line: []const u8, field: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, line, " \t\r");
+    if (!std.mem.startsWith(u8, trimmed, field)) return null;
+    const rest = std.mem.trim(u8, trimmed[field.len..], " ");
+    if (rest.len == 0 or rest[0] != ':') return null;
+    return std.mem.trim(u8, rest[1..], " ");
+}
+
+fn runCapture(allocator: Allocator, argv: []const []const u8) ?[]u8 {
+    const result = fs_compat.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .max_output_bytes = 8 * 1024 * 1024,
+    }) catch return null;
+    allocator.free(result.stderr);
+    switch (result.term) {
+        .Exited => |code| if (code != 0 and result.stdout.len == 0) {
+            allocator.free(result.stdout);
+            return null;
+        },
+        else => {
+            allocator.free(result.stdout);
+            return null;
+        },
+    }
+    return result.stdout;
+}
+
+fn collectFlatpakMatches(allocator: Allocator, query: []const u8, matches: *ArrayList(packages.PackageMatch)) !void {
+    const result = fs_compat.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "flatpak", "search", "--columns=name,description,application,version,remotes", query },
+        .max_output_bytes = 1024 * 1024,
+    }) catch return;
+
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    switch (result.term) {
+        .Exited => |code| if (code != 0) return,
+        else => return,
+    }
+
+    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        var parts = std.mem.splitScalar(u8, line, '\t');
+        const display_name = parts.next() orelse continue;
+        const description = parts.next() orelse "";
+        const application = std.mem.trim(u8, parts.next() orelse continue, " \t\r");
+        const version = parts.next() orelse "";
+        const remote = parts.next() orelse "";
+        if (std.mem.count(u8, application, ".") < 2) continue;
+
+        const remote_name = std.mem.trim(u8, remote, " ");
+        const repo = if (remote_name.len > 0) remote_name else "flathub";
+        const id = try std.fmt.allocPrint(allocator, "{s}/{s} {s}", .{ repo, application, std.mem.trim(u8, version, " ") });
+        try matches.append(allocator, .{
+            .name = try allocator.dupe(u8, application),
+            .source = .flatpak,
+            .id = id,
+            .description = try allocator.dupe(u8, std.mem.trim(u8, description, " ")),
+        });
+        _ = display_name;
+    }
+}
+
+fn installFromAlternateSources(allocator: Allocator, system_info: SystemInfo, package_name: []const u8) bool {
+    if (hasSource(system_info, .appimage)) {
+        print("🔄 Trying AppImage via AppMan...\n", .{});
+        if (installAppImage(allocator, package_name) catch false) {
+            print("✅ AppImage installed successfully\n", .{});
+            return true;
+        }
+    }
+
+    if (hasSource(system_info, .flatpak)) {
+        print("🔄 Trying Flatpak...\n", .{});
+        if (installFlatpak(allocator, package_name) catch false) {
+            print("✅ Installed via Flatpak\n", .{});
+            return true;
+        }
+        if (findFlatpakMatch(allocator, package_name) catch null) |flatpak_id| {
+            defer allocator.free(flatpak_id);
+            print("🎯 Found Flatpak match: {s}\n", .{flatpak_id});
+            if (installFlatpak(allocator, flatpak_id) catch false) {
+                print("✅ Installed via Flatpak\n", .{});
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+fn searchAllSources(allocator: Allocator, system_info: SystemInfo, query: []const u8) void {
+    print("\n", .{});
+
+    if (system_info.package_manager != .unknown) {
+        print("🏠 Native packages:\n", .{});
+        if (packages.buildCommand(allocator, system_info, .search, &[_][]const u8{query})) |cmd_parts| {
+            defer allocator.free(cmd_parts);
+
+            var child = fs_compat.Child.init(cmd_parts, allocator);
+            child.stdin_behavior = .Ignore;
+            child.stdout_behavior = .Inherit;
+            child.stderr_behavior = .Inherit;
+            _ = child.spawnAndWait() catch {};
+        } else |err| {
+            print("❌ Failed to build command: {}\n", .{err});
+        }
+    }
+
+    if (hasSource(system_info, .appimage)) {
+        print("\n", .{});
+        searchAppImage(allocator, query) catch {};
+    }
+    if (hasSource(system_info, .flatpak)) {
+        print("\n", .{});
+        searchFlatpak(allocator, query) catch {};
+    }
+}
+
 fn searchFlatpak(allocator: Allocator, package_name: []const u8) !void {
     print("📦 Flatpak results:\n", .{});
     var cmd_parts = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
@@ -701,7 +1271,7 @@ fn searchFlatpak(allocator: Allocator, package_name: []const u8) !void {
     const cmd_slice = try cmd_parts.toOwnedSlice(allocator);
     defer allocator.free(cmd_slice);
 
-    var child = std.process.Child.init(cmd_slice, allocator);
+    var child = fs_compat.Child.init(cmd_slice, allocator);
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
@@ -722,7 +1292,7 @@ fn findFlatpakMatch(allocator: Allocator, query: []const u8) !?[]const u8 {
     const cmd_slice = try cmd_parts.toOwnedSlice(allocator);
     defer allocator.free(cmd_slice);
 
-    var child = std.process.Child.init(cmd_slice, allocator);
+    var child = fs_compat.Child.init(cmd_slice, allocator);
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Ignore;
 
@@ -776,7 +1346,7 @@ fn installFlatpak(allocator: Allocator, package: []const u8) !bool {
     const cmd_slice = try cmd_parts.toOwnedSlice(allocator);
     defer allocator.free(cmd_slice);
 
-    var child = std.process.Child.init(cmd_slice, allocator);
+    var child = fs_compat.Child.init(cmd_slice, allocator);
     const term = child.spawnAndWait() catch return false;
 
     return switch (term) {
@@ -805,6 +1375,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+    fs_compat.setEnviron(init.environ);
 
     // Collect args from the 0.16 iterator into a slice
     var args_list = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
@@ -867,33 +1438,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             print("\n", .{});
         }
 
-        // For yay/paru, do complete pass-through (search + install) to preserve full functionality
-        if (system_info.package_manager == .yay or system_info.package_manager == .paru) {
-            print("\n", .{});
-
-            // Build command for yay/paru without any flags - this gives the full interactive experience
-            var cmd_parts = ArrayList([]const u8){};
-            try cmd_parts.append(allocator, system_info.package_manager.toString());
-            try cmd_parts.append(allocator, converted_args[1]);
-
-            const final_cmd_parts = try cmd_parts.toOwnedSlice(allocator);
-            defer allocator.free(final_cmd_parts);
-
-            var child = std.process.Child.init(final_cmd_parts, allocator);
-            child.stdout_behavior = .Inherit;
-            child.stderr_behavior = .Inherit;
-            child.stdin_behavior = .Inherit;
-
-            _ = child.spawnAndWait() catch |err| {
-                print("❌ Command failed: {}\n", .{err});
-                return;
-            };
-        } else {
-            // Fall back to interactive search for other package managers
-            packages.performInteractiveSearch(allocator, system_info, converted_args[1]) catch |err| {
-                print("❌ Interactive search failed: {}\n", .{err});
-            };
-        }
+        selectAndInstall(allocator, system_info, converted_args[1]);
         return;
     }
 
@@ -1018,7 +1563,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
         if (interactive) {
             // Use interactive import
-            const profile_contents = std.fs.cwd().readFileAlloc(allocator, profile_file, 1024 * 1024) catch |err| {
+            const profile_contents = fs_compat.cwd().readFileAlloc(allocator, profile_file, 1024 * 1024) catch |err| {
                 print("❌ Failed to read profile file: {}\n", .{err});
                 return;
             };
@@ -1112,39 +1657,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     // Handle search across multiple package sources
     if (command == .search) {
-        print("\n", .{});
-
-        // Search native packages first
-        if (system_info.package_manager != .unknown) {
-            print("🏠 Native packages:\n", .{});
-            const cmd_parts = packages.buildCommand(allocator, system_info, command, package_args) catch |err| {
-                print("❌ Failed to build command: {}\n", .{err});
-                return;
-            };
-            defer allocator.free(cmd_parts);
-
-            var child = std.process.Child.init(cmd_parts, allocator);
-            child.stdout_behavior = .Inherit;
-            child.stderr_behavior = .Inherit;
-            _ = child.spawnAndWait() catch {};
+        if (package_args.len == 0) {
+            print("❌ No packages specified\n", .{});
+            return;
         }
-
-        // Search additional sources
-        if (package_args.len > 0) {
-            for (system_info.package_sources) |source| {
-                switch (source) {
-                    .flatpak => {
-                        print("\n", .{});
-                        searchFlatpak(allocator, package_args[0]) catch {};
-                    },
-                    .appimage => {
-                        print("\n", .{});
-                        searchAppImage(allocator, package_args[0]) catch {};
-                    },
-                    else => {},
-                }
-            }
-        }
+        searchAllSources(allocator, system_info, package_args[0]);
         return;
     }
 
@@ -1157,7 +1674,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 // Read user input
                 print("🤔 Continue with system package manager? [y/N]: ", .{});
                 var buf: [256]u8 = undefined;
-                const stdin_file = std.fs.File.stdin();
+                const stdin_file = fs_compat.File.stdin();
                 const bytes_read = stdin_file.read(buf[0..]) catch 0;
                 if (bytes_read > 0) {
                     const input = buf[0..bytes_read];
@@ -1173,45 +1690,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
             }
         }
 
-        // For install, try Flatpak first if native package manager fails
+        // Native first. AppImage, then Flatpak, only if that install fails.
         if (system_info.package_manager != .unknown) {
             const cmd_parts = packages.buildCommand(allocator, system_info, command, package_args) catch |err| {
                 print("❌ Failed to build native command: {}\n", .{err});
-
-                // Try alternative sources as fallback
-                for (system_info.package_sources) |source| {
-                    if (package_args.len > 0) {
-                        switch (source) {
-                            .flatpak => {
-                                print("🔄 Trying Flatpak...\n", .{});
-
-                                // First try direct install with the given name
-                                if (installFlatpak(allocator, package_args[0]) catch false) {
-                                    print("✅ Installed via Flatpak\n", .{});
-                                    return;
-                                }
-
-                                // If that fails, try to find a matching Flatpak ID
-                                if (findFlatpakMatch(allocator, package_args[0]) catch null) |flatpak_id| {
-                                    defer allocator.free(flatpak_id);
-                                    print("🎯 Found Flatpak match: {s}\n", .{flatpak_id});
-                                    if (installFlatpak(allocator, flatpak_id) catch false) {
-                                        print("✅ Installed via Flatpak\n", .{});
-                                        return;
-                                    }
-                                }
-                            },
-                            .appimage => {
-                                print("🔄 Trying AppImage via AppMan...\n", .{});
-                                if (installAppImage(allocator, package_args[0]) catch false) {
-                                    print("✅ AppImage installed successfully\n", .{});
-                                    return;
-                                }
-                            },
-                            else => {},
-                        }
-                    }
-                }
+                if (package_args.len > 0) _ = installFromAlternateSources(allocator, system_info, package_args[0]);
                 return;
             };
             defer allocator.free(cmd_parts);
@@ -1223,32 +1706,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
             }
             print("\n", .{});
 
-            var child = std.process.Child.init(cmd_parts, allocator);
+            var child = fs_compat.Child.init(cmd_parts, allocator);
             const term = child.spawnAndWait() catch |err| {
                 print("❌ Failed to execute command: {}\n", .{err});
-
-                // Try Flatpak as fallback with intelligent matching
-                for (system_info.package_sources) |source| {
-                    if (source == .flatpak and package_args.len > 0) {
-                        print("🔄 Trying Flatpak...\n", .{});
-
-                        // First try direct install with the given name
-                        if (installFlatpak(allocator, package_args[0]) catch false) {
-                            print("✅ Installed via Flatpak\n", .{});
-                            return;
-                        }
-
-                        // If that fails, try to find a matching Flatpak ID
-                        if (findFlatpakMatch(allocator, package_args[0]) catch null) |flatpak_id| {
-                            defer allocator.free(flatpak_id);
-                            print("🎯 Found Flatpak match: {s}\n", .{flatpak_id});
-                            if (installFlatpak(allocator, flatpak_id) catch false) {
-                                print("✅ Installed via Flatpak\n", .{});
-                                return;
-                            }
-                        }
-                    }
-                }
+                if (package_args.len > 0) _ = installFromAlternateSources(allocator, system_info, package_args[0]);
                 return;
             };
 
@@ -1258,29 +1719,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                         print("✅ Command completed successfully\n", .{});
                     } else {
                         print("❌ Command failed with exit code: {}\n", .{code});
-
-                        // Try Flatpak as fallback with intelligent matching
-                        for (system_info.package_sources) |source| {
-                            if (source == .flatpak and package_args.len > 0) {
-                                print("🔄 Trying Flatpak...\n", .{});
-
-                                // First try direct install with the given name
-                                if (installFlatpak(allocator, package_args[0]) catch false) {
-                                    print("✅ Installed via Flatpak\n", .{});
-                                    return;
-                                }
-
-                                // If that fails, try to find a matching Flatpak ID
-                                if (findFlatpakMatch(allocator, package_args[0]) catch null) |flatpak_id| {
-                                    defer allocator.free(flatpak_id);
-                                    print("🎯 Found Flatpak match: {s}\n", .{flatpak_id});
-                                    if (installFlatpak(allocator, flatpak_id) catch false) {
-                                        print("✅ Installed via Flatpak\n", .{});
-                                        return;
-                                    }
-                                }
-                            }
-                        }
+                        if (package_args.len > 0) _ = installFromAlternateSources(allocator, system_info, package_args[0]);
                     }
                 },
                 else => {
@@ -1290,42 +1729,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
             return;
         }
 
-        // If no native package manager, try alternative sources
-        for (system_info.package_sources) |source| {
-            if (package_args.len > 0) {
-                switch (source) {
-                    .flatpak => {
-                        print("🚀 Installing via Flatpak: {s}\n", .{package_args[0]});
-
-                        // First try direct install
-                        if (installFlatpak(allocator, package_args[0]) catch false) {
-                            print("✅ Installed via Flatpak\n", .{});
-                            return;
-                        }
-
-                        // If that fails, try to find a matching Flatpak ID
-                        if (findFlatpakMatch(allocator, package_args[0]) catch null) |flatpak_id| {
-                            defer allocator.free(flatpak_id);
-                            print("🎯 Found Flatpak match: {s}\n", .{flatpak_id});
-                            if (installFlatpak(allocator, flatpak_id) catch false) {
-                                print("✅ Installed via Flatpak\n", .{});
-                                return;
-                            }
-                        }
-
-                        print("❌ Flatpak installation failed\n", .{});
-                    },
-                    .appimage => {
-                        print("🚀 Installing via AppMan/AppImage: {s}\n", .{package_args[0]});
-                        if (installAppImage(allocator, package_args[0]) catch false) {
-                            print("✅ AppImage installed successfully\n", .{});
-                            return;
-                        }
-                        print("❌ AppImage not available through AppMan or fallback methods\n", .{});
-                    },
-                    else => {},
-                }
-            }
+        // No native package manager: AppImage, then Flatpak.
+        if (package_args.len > 0 and installFromAlternateSources(allocator, system_info, package_args[0])) {
+            return;
         }
 
         print("❌ No available package sources for installation\n", .{});
@@ -1349,7 +1755,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 print("==================================\n", .{});
             }
 
-            var child = std.process.Child.init(cmd_parts, allocator);
+            var child = fs_compat.Child.init(cmd_parts, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = child.spawnAndWait() catch {};
@@ -1386,7 +1792,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             cmd_parts.append(allocator, arg) catch return;
         }
 
-        var child = std.process.Child.init(cmd_parts.items, allocator);
+        var child = fs_compat.Child.init(cmd_parts.items, allocator);
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
 
@@ -1437,7 +1843,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             }
             print("\n\n", .{});
 
-            var child = std.process.Child.init(cmd_parts, allocator);
+            var child = fs_compat.Child.init(cmd_parts, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = child.spawnAndWait() catch {};
@@ -1487,7 +1893,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
     print("\n", .{});
 
-    var child = std.process.Child.init(cmd_parts, allocator);
+    var child = fs_compat.Child.init(cmd_parts, allocator);
     const term = child.spawnAndWait() catch |err| {
         print("❌ Failed to execute command: {}\n", .{err});
         return;
@@ -1502,7 +1908,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 if (command == .install) {
                     print("\n⚠️  Installation failed. Would you like to run a Smart Diagnostic? [y/N]: ", .{});
                     var buf: [256]u8 = undefined;
-                    const stdin = std.fs.File.stdin();
+                    const stdin = fs_compat.File.stdin();
                     const bytes_read = stdin.read(buf[0..]) catch 0;
                     if (bytes_read > 0) {
                         const input = std.mem.trim(u8, buf[0..bytes_read], " \t\r\n");
@@ -1510,12 +1916,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
                             print("\n🔍 Analyzing failure (this will rerun the process silently, please wait)...\n", .{});
                             const smart_recovery = @import("core/recovery.zig");
 
-                            var diag_child = std.process.Child.init(cmd_parts, allocator);
+                            var diag_child = fs_compat.Child.init(cmd_parts, allocator);
                             diag_child.stdout_behavior = .Pipe;
                             diag_child.stderr_behavior = .Pipe;
 
-                            var stdout_buf = std.ArrayList(u8){};
-                            var stderr_buf = std.ArrayList(u8){};
+                            var stdout_buf = std.ArrayList(u8){ .items = &.{}, .capacity = 0 };
+                            var stderr_buf = std.ArrayList(u8){ .items = &.{}, .capacity = 0 };
                             defer stdout_buf.deinit(allocator);
                             defer stderr_buf.deinit(allocator);
 
@@ -1534,7 +1940,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                                     const fix_bytes = stdin.read(buf[0..]) catch 0;
                                     const fix_input = std.mem.trim(u8, buf[0..fix_bytes], " \t\r\n");
                                     if (fix_input.len > 0 and (fix_input[0] == 'y' or fix_input[0] == 'Y')) {
-                                        var fixed_cmd = std.ArrayList([]const u8){};
+                                        var fixed_cmd = std.ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
                                         defer fixed_cmd.deinit(allocator);
 
                                         for (cmd_parts) |part| {
@@ -1546,7 +1952,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                                         }
 
                                         print("\n🚀 Rerunning with skipped checksums...\n", .{});
-                                        var fixed_child = std.process.Child.init(fixed_cmd.items, allocator);
+                                        var fixed_child = fs_compat.Child.init(fixed_cmd.items, allocator);
                                         _ = fixed_child.spawnAndWait() catch {};
                                     }
                                 } else if (action.action_type == .install_dependencies) {
@@ -1561,7 +1967,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                                         defer allocator.free(dep_cmd);
 
                                         print("\n🚀 Installing dependencies...\n", .{});
-                                        var dep_child = std.process.Child.init(dep_cmd, allocator);
+                                        var dep_child = fs_compat.Child.init(dep_cmd, allocator);
                                         const dep_term = dep_child.spawnAndWait() catch return;
 
                                         if (dep_term == .Exited and dep_term.Exited == 0) {

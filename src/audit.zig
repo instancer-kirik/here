@@ -12,6 +12,7 @@ const std = @import("std");
 const print = std.debug.print;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const fs_compat = @import("fs_compat.zig");
 
 // ---------------------------------------------------------------------------
 // Risk classification
@@ -155,12 +156,12 @@ const RECENT_DAYS: i64 = 7;
 // ---------------------------------------------------------------------------
 
 fn runCaptured(allocator: Allocator, argv: []const []const u8) ![]u8 {
-    var child = std.process.Child.init(argv, allocator);
+    var child = fs_compat.Child.init(argv, allocator);
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Ignore;
     try child.spawn();
 
-    var out = ArrayList(u8){};
+    var out = ArrayList(u8){ .items = &.{}, .capacity = 0 };
     defer {
         // only clean up on error path – caller owns the slice
     }
@@ -201,16 +202,16 @@ const LIFECYCLE_HOOKS = [_][]const u8{
 /// Scan a single node_modules directory for suspicious packages.
 /// `modules_dir` should be the absolute path to `node_modules`.
 pub fn scanNodeModules(allocator: Allocator, modules_dir: []const u8) ![]PackageFinding {
-    var findings = ArrayList(PackageFinding){};
+    var findings = ArrayList(PackageFinding){ .items = &.{}, .capacity = 0 };
     errdefer findings.deinit(allocator);
 
-    var dir = std.fs.openDirAbsolute(modules_dir, .{ .iterate = true }) catch |err| {
+    var dir = fs_compat.openDirAbsolute(modules_dir, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound or err == error.NotDir) return &[_]PackageFinding{};
         return err;
     };
     defer dir.close();
 
-    const now_sec: i64 = @intCast(std.time.timestamp());
+    const now_sec: i64 = @intCast(fs_compat.timestamp());
 
     var it = dir.iterate();
     while (try it.next()) |entry| {
@@ -221,7 +222,7 @@ pub fn scanNodeModules(allocator: Allocator, modules_dir: []const u8) ![]Package
             const scope_path = try std.fs.path.join(allocator, &.{ modules_dir, entry.name });
             defer allocator.free(scope_path);
 
-            var scope_dir = std.fs.openDirAbsolute(scope_path, .{ .iterate = true }) catch continue;
+            var scope_dir = fs_compat.openDirAbsolute(scope_path, .{ .iterate = true }) catch continue;
             defer scope_dir.close();
 
             var sit = scope_dir.iterate();
@@ -256,11 +257,11 @@ fn auditNodePackage(allocator: Allocator, pkg_path: []const u8, pkg_name: []cons
     const pkg_json_path = try std.fs.path.join(allocator, &.{ pkg_path, "package.json" });
     defer allocator.free(pkg_json_path);
 
-    const pkg_json_data = std.fs.cwd().readFileAlloc(allocator, pkg_json_path, 256 * 1024) catch return null;
+    const pkg_json_data = fs_compat.cwd().readFileAlloc(allocator, pkg_json_path, 256 * 1024) catch return null;
     defer allocator.free(pkg_json_data);
 
     // Get mtime of package.json as proxy for when the package was installed/modified
-    const stat = std.fs.cwd().statFile(pkg_json_path) catch return null;
+    const stat = fs_compat.cwd().statFile(pkg_json_path) catch return null;
     const mtime_sec: i64 = @intCast(@divFloor(stat.mtime, std.time.ns_per_s));
     const days_ago: i64 = @divFloor(now_sec - mtime_sec, 86400);
     const recently_modified = days_ago >= 0 and days_ago <= RECENT_DAYS;
@@ -293,7 +294,7 @@ fn auditNodePackage(allocator: Allocator, pkg_path: []const u8, pkg_name: []cons
     }
 
     const scripts_obj = scripts_val.?.object;
-    var script_findings = ArrayList(ScriptFinding){};
+    var script_findings = ArrayList(ScriptFinding){ .items = &.{}, .capacity = 0 };
     errdefer script_findings.deinit(allocator);
 
     var overall_risk: RiskLevel = .info;
@@ -304,7 +305,7 @@ fn auditNodePackage(allocator: Allocator, pkg_path: []const u8, pkg_name: []cons
         const content = script_val.string;
 
         // Scan for suspicious patterns
-        var flags = ArrayList([]u8){};
+        var flags = ArrayList([]u8){ .items = &.{}, .capacity = 0 };
         errdefer flags.deinit(allocator);
         var script_risk: RiskLevel = .info;
 
@@ -355,16 +356,16 @@ fn auditNodePackage(allocator: Allocator, pkg_path: []const u8, pkg_name: []cons
 /// packages that ship a `setup.py` or `*.dist-info/RECORD` with suspicious
 /// console_scripts / entry_points that exec shell commands.
 pub fn scanPipPackages(allocator: Allocator, site_packages_dir: []const u8) ![]PackageFinding {
-    var findings = ArrayList(PackageFinding){};
+    var findings = ArrayList(PackageFinding){ .items = &.{}, .capacity = 0 };
     errdefer findings.deinit(allocator);
 
-    var dir = std.fs.openDirAbsolute(site_packages_dir, .{ .iterate = true }) catch |err| {
+    var dir = fs_compat.openDirAbsolute(site_packages_dir, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound or err == error.NotDir) return &[_]PackageFinding{};
         return err;
     };
     defer dir.close();
 
-    const now_sec: i64 = @intCast(std.time.timestamp());
+    const now_sec: i64 = @intCast(fs_compat.timestamp());
 
     var it = dir.iterate();
     while (try it.next()) |entry| {
@@ -382,7 +383,7 @@ pub fn scanPipPackages(allocator: Allocator, site_packages_dir: []const u8) ![]P
         const metadata_path = try std.fs.path.join(allocator, &.{ site_packages_dir, entry.name, "METADATA" });
         defer allocator.free(metadata_path);
 
-        const stat = std.fs.cwd().statFile(metadata_path) catch continue;
+        const stat = fs_compat.cwd().statFile(metadata_path) catch continue;
         const mtime_sec: i64 = @intCast(@divFloor(stat.mtime, std.time.ns_per_s));
         const days_ago: i64 = @divFloor(now_sec - mtime_sec, 86400);
         const recently_modified = days_ago >= 0 and days_ago <= RECENT_DAYS;
@@ -391,13 +392,13 @@ pub fn scanPipPackages(allocator: Allocator, site_packages_dir: []const u8) ![]P
         const ep_path = try std.fs.path.join(allocator, &.{ site_packages_dir, entry.name, "entry_points.txt" });
         defer allocator.free(ep_path);
 
-        var script_findings = ArrayList(ScriptFinding){};
+        var script_findings = ArrayList(ScriptFinding){ .items = &.{}, .capacity = 0 };
         errdefer script_findings.deinit(allocator);
 
-        if (std.fs.cwd().readFileAlloc(allocator, ep_path, 64 * 1024)) |ep_data| {
+        if (fs_compat.cwd().readFileAlloc(allocator, ep_path, 64 * 1024)) |ep_data| {
             defer allocator.free(ep_data);
 
-            var flags = ArrayList([]u8){};
+            var flags = ArrayList([]u8){ .items = &.{}, .capacity = 0 };
             errdefer flags.deinit(allocator);
             var risk: RiskLevel = .info;
 
@@ -461,7 +462,7 @@ const ScanTarget = struct {
 fn discoverTargets(allocator: Allocator, search_root: []const u8, targets: *ArrayList(ScanTarget), depth: usize) !void {
     if (depth > MAX_SEARCH_DEPTH) return;
 
-    var dir = std.fs.openDirAbsolute(search_root, .{ .iterate = true }) catch return;
+    var dir = fs_compat.openDirAbsolute(search_root, .{ .iterate = true }) catch return;
     defer dir.close();
 
     var it = dir.iterate();
@@ -753,7 +754,7 @@ pub fn checkNpmRegistry(allocator: Allocator, pkg_name: []const u8, installed_ve
         if (publish_time_val != null and publish_time_val.? == .string) {
             const ts = parseIso8601(publish_time_val.?.string);
             if (ts) |publish_ts| {
-                const now: i64 = @intCast(std.time.timestamp());
+                const now: i64 = @intCast(fs_compat.timestamp());
                 version_age_days = @divFloor(now - publish_ts, 86400);
             }
         }
@@ -776,7 +777,7 @@ pub fn checkNpmRegistry(allocator: Allocator, pkg_name: []const u8, installed_ve
     }
 
     // Collect the set of all historical publishers (for all versions older than installed)
-    var historical_publishers = ArrayList([]const u8){};
+    var historical_publishers = ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
     defer historical_publishers.deinit(allocator);
 
     if (versions_val != null and versions_val.? == .object) {
@@ -860,10 +861,10 @@ const BUILD_RS_PATTERNS = [_]SuspiciousPattern{
 
 /// Scan a single build.rs file for suspicious patterns.
 fn auditBuildRs(allocator: Allocator, build_rs_path: []const u8, crate_name: []const u8) !?BuildRsFinding {
-    const content = std.fs.cwd().readFileAlloc(allocator, build_rs_path, 512 * 1024) catch return null;
+    const content = fs_compat.cwd().readFileAlloc(allocator, build_rs_path, 512 * 1024) catch return null;
     defer allocator.free(content);
 
-    var flags = ArrayList([]u8){};
+    var flags = ArrayList([]u8){ .items = &.{}, .capacity = 0 };
     errdefer flags.deinit(allocator);
     var risk: RiskLevel = .info;
 
@@ -888,7 +889,7 @@ fn auditBuildRs(allocator: Allocator, build_rs_path: []const u8, crate_name: []c
 /// Walk a directory tree looking for Cargo.toml + build.rs pairs.
 /// Returns all suspicious build scripts found.
 pub fn scanCargoBuildScripts(allocator: Allocator, search_root: []const u8) ![]BuildRsFinding {
-    var findings = ArrayList(BuildRsFinding){};
+    var findings = ArrayList(BuildRsFinding){ .items = &.{}, .capacity = 0 };
     errdefer findings.deinit(allocator);
 
     try walkCargoDir(allocator, search_root, &findings, 0);
@@ -899,9 +900,9 @@ fn walkCargoDir(allocator: Allocator, dir_path: []const u8, findings: *ArrayList
     if (depth > 8) return;
 
     var dir = if (std.fs.path.isAbsolute(dir_path))
-        std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return
+        fs_compat.openDirAbsolute(dir_path, .{ .iterate = true }) catch return
     else
-        std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
+        fs_compat.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
     defer dir.close();
 
     var it = dir.iterate();
@@ -922,7 +923,7 @@ fn walkCargoDir(allocator: Allocator, dir_path: []const u8, findings: *ArrayList
         const cargo_toml_path = try std.fs.path.join(allocator, &.{ dir_path, "Cargo.toml" });
         defer allocator.free(cargo_toml_path);
         const crate_name = blk: {
-            const toml = std.fs.cwd().readFileAlloc(allocator, cargo_toml_path, 64 * 1024) catch break :blk entry.name;
+            const toml = fs_compat.cwd().readFileAlloc(allocator, cargo_toml_path, 64 * 1024) catch break :blk entry.name;
             defer allocator.free(toml);
             // Very simple TOML name extraction: find 'name = "..."'
             const name_key = "name = \"";
@@ -974,16 +975,16 @@ fn commandExistsOnPath(cmd: []const u8) bool {
     var buf: [512]u8 = undefined;
     for (path_dirs) |dir| {
         const full = std.fmt.bufPrint(&buf, "{s}/{s}", .{ dir, cmd }) catch continue;
-        std.fs.cwd().access(full, .{}) catch continue;
+        fs_compat.cwd().access(full, .{}) catch continue;
         return true;
     }
     // Also check $PATH via the environment variable if the above misses
-    const path_env = std.process.getEnvVarOwned(std.heap.page_allocator, "PATH") catch return false;
+    const path_env = fs_compat.getEnvVarOwned(std.heap.page_allocator, "PATH") catch return false;
     defer std.heap.page_allocator.free(path_env);
     var parts = std.mem.splitScalar(u8, path_env, ':');
     while (parts.next()) |dir| {
         const full = std.fmt.bufPrint(&buf, "{s}/{s}", .{ dir, cmd }) catch continue;
-        std.fs.cwd().access(full, .{}) catch continue;
+        fs_compat.cwd().access(full, .{}) catch continue;
         return true;
     }
     return false;
@@ -996,7 +997,7 @@ fn runEcosystemAuditors(allocator: Allocator, project_dir: []const u8, run_tools
     for (ECOSYSTEM_AUDITORS) |spec| {
         const indicator = std.fs.path.join(allocator, &.{ project_dir, spec.indicator_file }) catch continue;
         defer allocator.free(indicator);
-        std.fs.cwd().access(indicator, .{}) catch continue;
+        fs_compat.cwd().access(indicator, .{}) catch continue;
 
         const tool_present = commandExistsOnPath(spec.tool);
 
@@ -1019,7 +1020,7 @@ fn runEcosystemAuditors(allocator: Allocator, project_dir: []const u8, run_tools
         }
 
         print("\n🔍 Running {s} advisory check...\n", .{spec.label});
-        var child = std.process.Child.init(spec.args, allocator);
+        var child = fs_compat.Child.init(spec.args, allocator);
         child.cwd = project_dir;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -1058,12 +1059,12 @@ fn checkLockfiles(project_dir: []const u8, allocator: Allocator) void {
     for (LOCKFILE_SPECS) |spec| {
         const manifest_path = std.fs.path.join(allocator, &.{ project_dir, spec.manifest }) catch continue;
         defer allocator.free(manifest_path);
-        std.fs.cwd().access(manifest_path, .{}) catch continue;
+        fs_compat.cwd().access(manifest_path, .{}) catch continue;
 
         const lock_path = std.fs.path.join(allocator, &.{ project_dir, spec.lockfile }) catch continue;
         defer allocator.free(lock_path);
 
-        if (std.fs.cwd().access(lock_path, .{})) {
+        if (fs_compat.cwd().access(lock_path, .{})) {
             // lockfile exists – good
         } else |_| {
             if (!printed_header) {
@@ -1096,11 +1097,11 @@ fn runNativeAudit(allocator: Allocator, project_dir: []const u8) void {
         const lock_path = std.fs.path.join(allocator, &.{ project_dir, lf.file }) catch continue;
         defer allocator.free(lock_path);
 
-        std.fs.cwd().access(lock_path, .{}) catch continue;
+        fs_compat.cwd().access(lock_path, .{}) catch continue;
 
         print("🔍 Running {s} audit in {s}...\n", .{ lf.tool, project_dir });
 
-        var child = std.process.Child.init(lf.args, allocator);
+        var child = fs_compat.Child.init(lf.args, allocator);
         child.cwd = project_dir;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -1172,7 +1173,7 @@ fn printFinding(f: *const PackageFinding) void {
 pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
     // Determine search root – always resolve to an absolute path
     var search_root_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd_abs = try std.process.getCwd(&search_root_buf);
+    const cwd_abs = try fs_compat.getCwd(&search_root_buf);
     var abs_buf: [std.fs.max_path_bytes]u8 = undefined;
     const search_root = if (args.len > 0 and !std.mem.startsWith(u8, args[0], "--")) blk: {
         const given = args[0];
@@ -1180,7 +1181,7 @@ pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
         // Resolve relative path against cwd
         const joined = try std.fs.path.join(allocator, &.{ cwd_abs, given });
         defer allocator.free(joined);
-        const resolved = try std.fs.realpath(joined, &abs_buf);
+        const resolved = try fs_compat.realpath(joined, &abs_buf);
         break :blk resolved;
     } else cwd_abs;
 
@@ -1216,7 +1217,7 @@ pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
     const has_cargo = blk: {
         const ct = std.fs.path.join(allocator, &.{ search_root, "Cargo.toml" }) catch break :blk false;
         defer allocator.free(ct);
-        if (std.fs.cwd().access(ct, .{})) { break :blk true; } else |_| { break :blk false; }
+        if (fs_compat.cwd().access(ct, .{})) { break :blk true; } else |_| { break :blk false; }
     };
     if (has_cargo) {
         const bfindings = scanCargoBuildScripts(allocator, search_root) catch |err| blk: {
@@ -1244,7 +1245,7 @@ pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
     }
 
     // --- node_modules / site-packages discovery and scan ---
-    var targets = ArrayList(ScanTarget){};
+    var targets = ArrayList(ScanTarget){ .items = &.{}, .capacity = 0 };
     defer {
         for (targets.items) |*t| t.deinit();
         targets.deinit(allocator);
@@ -1294,7 +1295,7 @@ pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
 
         // Typosquatting check on every package in this directory
         {
-            var dir = std.fs.openDirAbsolute(target.path, .{ .iterate = true }) catch null;
+            var dir = fs_compat.openDirAbsolute(target.path, .{ .iterate = true }) catch null;
             if (dir) |*d| {
                 defer d.close();
                 var it = d.iterate();
@@ -1375,7 +1376,7 @@ pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
             };
             defer allocator.free(pkg_json_path);
 
-            if (std.fs.cwd().readFileAlloc(allocator, pkg_json_path, 512 * 1024)) |pj| {
+            if (fs_compat.cwd().readFileAlloc(allocator, pkg_json_path, 512 * 1024)) |pj| {
                 defer allocator.free(pj);
                 if (std.json.parseFromSlice(std.json.Value, allocator, pj, .{})) |parsed| {
                     defer parsed.deinit();
@@ -1390,7 +1391,7 @@ pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
                             // Get installed version from package.json inside node_modules
                             const nm_pkg_path = try std.fs.path.join(allocator, &.{ target.path, dep_name, "package.json" });
                             defer allocator.free(nm_pkg_path);
-                            const nm_pj = std.fs.cwd().readFileAlloc(allocator, nm_pkg_path, 64 * 1024) catch continue;
+                            const nm_pj = fs_compat.cwd().readFileAlloc(allocator, nm_pkg_path, 64 * 1024) catch continue;
                             defer allocator.free(nm_pj);
                             const nm_parsed = std.json.parseFromSlice(std.json.Value, allocator, nm_pj, .{}) catch continue;
                             defer nm_parsed.deinit();
@@ -1477,7 +1478,7 @@ pub fn viewPkgbuild(allocator: Allocator, package_name: []const u8) !void {
         const argv = [_][]const u8{ helper, "--getpkgbuild", package_name };
 
         // Check if helper exists
-        var which = std.process.Child.init(&.{ "which", helper }, allocator);
+        var which = fs_compat.Child.init(&.{ "which", helper }, allocator);
         which.stdout_behavior = .Ignore;
         which.stderr_behavior = .Ignore;
         const which_term = which.spawnAndWait() catch continue;
@@ -1485,7 +1486,7 @@ pub fn viewPkgbuild(allocator: Allocator, package_name: []const u8) !void {
 
         print("📥 Fetching PKGBUILD via {s}...\n\n", .{helper});
 
-        var child = std.process.Child.init(&argv, allocator);
+        var child = fs_compat.Child.init(&argv, allocator);
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
         const term = child.spawnAndWait() catch continue;
@@ -1494,7 +1495,7 @@ pub fn viewPkgbuild(allocator: Allocator, package_name: []const u8) !void {
             const pkgbuild_path = try std.fs.path.join(allocator, &.{ package_name, "PKGBUILD" });
             defer allocator.free(pkgbuild_path);
 
-            if (std.fs.cwd().readFileAlloc(allocator, pkgbuild_path, 512 * 1024)) |data| {
+            if (fs_compat.cwd().readFileAlloc(allocator, pkgbuild_path, 512 * 1024)) |data| {
                 defer allocator.free(data);
                 print("\n", .{});
                 printSeparator('-', 60);
@@ -1513,13 +1514,13 @@ pub fn viewPkgbuild(allocator: Allocator, package_name: []const u8) !void {
 
     // 2. Try asp (Arch source package tool) for official repo packages
     {
-        var which = std.process.Child.init(&.{ "which", "asp" }, allocator);
+        var which = fs_compat.Child.init(&.{ "which", "asp" }, allocator);
         which.stdout_behavior = .Ignore;
         which.stderr_behavior = .Ignore;
         _ = which.spawnAndWait() catch null;
 
         const asp_argv = [_][]const u8{ "asp", "show", package_name };
-        var child = std.process.Child.init(&asp_argv, allocator);
+        var child = fs_compat.Child.init(&asp_argv, allocator);
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
         if (child.spawnAndWait()) |term| {

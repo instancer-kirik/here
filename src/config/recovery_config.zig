@@ -1,4 +1,5 @@
 const std = @import("std");
+const fs_compat = @import("../fs_compat.zig");
 
 // Recovery system configuration management
 pub const RecoveryConfig = struct {
@@ -90,7 +91,7 @@ pub const RecoveryConfig = struct {
 
     // Load configuration from file
     pub fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !RecoveryConfig {
-        const file_content = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        const file_content = fs_compat.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
             error.FileNotFound => {
                 std.debug.print("📋 No config file found, using defaults\n", .{});
                 return default();
@@ -107,7 +108,7 @@ pub const RecoveryConfig = struct {
         const config_text = try self.toText(allocator);
         defer allocator.free(config_text);
 
-        const file = std.fs.cwd().createFile(path, .{}) catch |err| {
+        const file = fs_compat.cwd().createFile(path, .{}) catch |err| {
             std.debug.print("❌ Failed to create config file: {}\n", .{err});
             return err;
         };
@@ -119,23 +120,22 @@ pub const RecoveryConfig = struct {
 
     // Convert configuration to simple text format
     pub fn toText(self: *const RecoveryConfig, allocator: std.mem.Allocator) ![]u8 {
-        var config_text = std.ArrayList(u8){};
+        var config_text = std.ArrayList(u8){ .items = &.{}, .capacity = 0 };
         defer config_text.deinit(allocator);
 
-        const writer = config_text.writer(allocator);
-        try writer.print("backup_path={s}\n", .{self.backup_path});
-        try writer.print("auto_detect_databases={}\n", .{self.auto_detect_databases});
-        try writer.print("preferred_migration_strategy={s}\n", .{@tagName(self.preferred_migration_strategy)});
-        try writer.print("enable_progress_tracking={}\n", .{self.enable_progress_tracking});
-        try writer.print("backup_existing_data={}\n", .{self.backup_existing_data});
-        try writer.print("dry_run_mode={}\n", .{self.dry_run_mode});
-        try writer.print("require_confirmation={}\n", .{self.require_confirmation});
-        try writer.print("max_parallel_operations={}\n", .{self.max_parallel_operations});
-        try writer.print("timeout_seconds={}\n", .{self.timeout_seconds});
-        try writer.print("chunk_size_mb={}\n", .{self.chunk_size_mb});
-        try writer.print("log_level={s}\n", .{@tagName(self.log_level)});
-        try writer.print("enable_metrics={}\n", .{self.enable_metrics});
-        try writer.print("metrics_port={}\n", .{self.metrics_port});
+        try config_text.print(allocator, "backup_path={s}\n", .{self.backup_path});
+        try config_text.print(allocator, "auto_detect_databases={}\n", .{self.auto_detect_databases});
+        try config_text.print(allocator, "preferred_migration_strategy={s}\n", .{@tagName(self.preferred_migration_strategy)});
+        try config_text.print(allocator, "enable_progress_tracking={}\n", .{self.enable_progress_tracking});
+        try config_text.print(allocator, "backup_existing_data={}\n", .{self.backup_existing_data});
+        try config_text.print(allocator, "dry_run_mode={}\n", .{self.dry_run_mode});
+        try config_text.print(allocator, "require_confirmation={}\n", .{self.require_confirmation});
+        try config_text.print(allocator, "max_parallel_operations={}\n", .{self.max_parallel_operations});
+        try config_text.print(allocator, "timeout_seconds={}\n", .{self.timeout_seconds});
+        try config_text.print(allocator, "chunk_size_mb={}\n", .{self.chunk_size_mb});
+        try config_text.print(allocator, "log_level={s}\n", .{@tagName(self.log_level)});
+        try config_text.print(allocator, "enable_metrics={}\n", .{self.enable_metrics});
+        try config_text.print(allocator, "metrics_port={}\n", .{self.metrics_port});
 
         return config_text.toOwnedSlice(allocator);
     }
@@ -196,7 +196,7 @@ pub const RecoveryConfig = struct {
         // Backup path configuration
         std.debug.print("📁 Backup path [{s}]: ", .{config.backup_path});
         var buffer: [512]u8 = undefined;
-        const stdin = std.fs.File.stdin();
+        const stdin = fs_compat.File.stdin();
         if (stdin.read(buffer[0..])) |bytes_read| {
             if (bytes_read > 0) {
                 const input = buffer[0..bytes_read];
@@ -257,7 +257,7 @@ pub const RecoveryConfig = struct {
     // Validate configuration
     pub fn validate(self: *const RecoveryConfig) !void {
         // Check backup path exists
-        std.fs.cwd().access(self.backup_path, .{}) catch {
+        fs_compat.cwd().access(self.backup_path, .{}) catch {
             std.debug.print("❌ Backup path not accessible: {s}\n", .{self.backup_path});
             return error.InvalidBackupPath;
         };
@@ -309,7 +309,7 @@ pub const CONFIG_FILE = "recovery.conf";
 
 // Get configuration file path
 pub fn getConfigPath(allocator: std.mem.Allocator) ![]u8 {
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch {
+    const home = fs_compat.getEnvVarOwned(allocator, "HOME") catch {
         return error.HomeNotFound;
     };
     defer allocator.free(home);
@@ -319,7 +319,7 @@ pub fn getConfigPath(allocator: std.mem.Allocator) ![]u8 {
 
 // Ensure configuration directory exists
 pub fn ensureConfigDir(allocator: std.mem.Allocator) !void {
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch {
+    const home = fs_compat.getEnvVarOwned(allocator, "HOME") catch {
         return error.HomeNotFound;
     };
     defer allocator.free(home);
@@ -327,7 +327,7 @@ pub fn ensureConfigDir(allocator: std.mem.Allocator) !void {
     const config_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, CONFIG_DIR });
     defer allocator.free(config_dir);
 
-    std.fs.cwd().makeDir(config_dir) catch |err| switch (err) {
+    fs_compat.cwd().makeDir(config_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {}, // Directory exists, that's fine
         else => return err,
     };

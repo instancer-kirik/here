@@ -302,7 +302,7 @@ fn detectPackageManager(distro: Distro) PackageManager {
 }
 
 pub fn commandExists(command: []const u8) bool {
-    var child = std.process.Child.init(&[_][]const u8{ "which", command }, std.heap.page_allocator);
+    var child = fs_compat.Child.init(&[_][]const u8{ "which", command }, std.heap.page_allocator);
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Ignore;
 

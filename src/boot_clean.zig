@@ -232,7 +232,7 @@ pub fn runBootClean(allocator: Allocator, dry_run: bool) !void {
         const ok = blk: {
             fs_compat.deleteFile(f.path) catch {
                 // Fallback: spawn sudo rm
-                var rm = std.process.Child.init(
+                var rm = fs_compat.Child.init(
                     &[_][]const u8{ "sudo", "rm", "-rf", f.path },
                     allocator,
                 );

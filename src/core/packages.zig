@@ -3,6 +3,7 @@ const print = std.debug.print;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const system = @import("system.zig");
+const fs_compat = @import("../fs_compat.zig");
 const cli = @import("cli.zig");
 const SystemInfo = system.SystemInfo;
 const PackageManager = system.PackageManager;
@@ -62,7 +63,9 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                     try cmd_parts.append(allocator, "-S");
                     try cmd_parts.append(allocator, "--noconfirm");
                 },
-                .search => try cmd_parts.append(allocator, "-s"),
+                // -Ss prints results and exits. -s opens yay's install menu and
+                // blocks the other sources this command is supposed to search.
+                .search => try cmd_parts.append(allocator, "-Ss"),
                 .remove => {
                     try cmd_parts.append(allocator, "-R");
                     try cmd_parts.append(allocator, "--noconfirm");
@@ -70,6 +73,10 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                 .update => {
                     try cmd_parts.append(allocator, "-Syu");
                     try cmd_parts.append(allocator, "--noconfirm");
+                    // Unowned files (electron40 and friends) abort the whole
+                    // transaction. Take those paths instead of rolling back.
+                    try cmd_parts.append(allocator, "--overwrite");
+                    try cmd_parts.append(allocator, "*");
                 },
                 .list => try cmd_parts.append(allocator, "-Q"),
                 .info => try cmd_parts.append(allocator, "-Si"),
@@ -94,6 +101,10 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                 .update => {
                     try cmd_parts.append(allocator, "-Syu");
                     try cmd_parts.append(allocator, "--noconfirm");
+                    // Unowned files (electron40 and friends) abort the whole
+                    // transaction. Take those paths instead of rolling back.
+                    try cmd_parts.append(allocator, "--overwrite");
+                    try cmd_parts.append(allocator, "*");
                 },
                 .list => try cmd_parts.append(allocator, "-Q"),
                 .info => try cmd_parts.append(allocator, "-Si"),
@@ -261,7 +272,7 @@ pub fn suggestVersionManager(system_info: SystemInfo, tool: DevelopmentTool, pac
 pub fn installPackagesBatch(allocator: Allocator, filename: []const u8, install_native: bool, install_flatpak: bool, install_appimage: bool, install_all: bool) !void {
     const profile_parser = @import("../import/parser.zig");
 
-    const contents = std.fs.cwd().readFileAlloc(allocator, filename, 1024 * 1024) catch |err| {
+    const contents = fs_compat.cwd().readFileAlloc(allocator, filename, 1024 * 1024) catch |err| {
         print("❌ Failed to read profile file: {}\n", .{err});
         return;
     };
@@ -298,7 +309,7 @@ pub fn installPackagesBatch(allocator: Allocator, filename: []const u8, install_
                 };
                 defer allocator.free(cmd_parts);
 
-                const result = std.process.Child.run(.{
+                const result = fs_compat.Child.run(.{
                     .allocator = allocator,
                     .argv = cmd_parts,
                 }) catch {
@@ -327,7 +338,7 @@ pub fn installPackagesBatch(allocator: Allocator, filename: []const u8, install_
             for (profile.flatpak_packages.items, 0..) |pkg, idx| {
                 print("  [{}/{}] Installing {s}... ", .{ idx + 1, profile.flatpak_packages.items.len, pkg });
 
-                const result = std.process.Child.run(.{
+                const result = fs_compat.Child.run(.{
                     .allocator = allocator,
                     .argv = &[_][]const u8{ "flatpak", "install", "-y", pkg },
                 }) catch {
@@ -383,7 +394,7 @@ pub fn unlockPackageManager(allocator: Allocator, system_info: SystemInfo) !void
     var found_any = false;
     for (lock_files) |lock_file| {
         // Check if file exists
-        std.fs.accessAbsolute(lock_file, .{}) catch {
+        fs_compat.accessAbsolute(lock_file, .{}) catch {
             continue;
         };
 
@@ -391,7 +402,7 @@ pub fn unlockPackageManager(allocator: Allocator, system_info: SystemInfo) !void
         print("🔍 Found lock file: {s}\n", .{lock_file});
         print("🚀 Removing: sudo rm {s}\n", .{lock_file});
 
-        const result = std.process.Child.run(.{
+        const result = fs_compat.Child.run(.{
             .allocator = allocator,
             .argv = &[_][]const u8{ "sudo", "rm", lock_file },
         }) catch |err| {
@@ -422,7 +433,7 @@ pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, s
     print("\n", .{});
 
     // First get search results without showing them yet
-    var search_results = ArrayList(PackageMatch){};
+    var search_results = ArrayList(PackageMatch){ .items = &.{}, .capacity = 0 };
     defer {
         for (search_results.items) |pkg| {
             allocator.free(pkg.name);
@@ -465,7 +476,7 @@ pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, s
     print("\n==> Packages to install (eg: 1 2 3, 1-3 or ^4)\n==> ", .{});
 
     var buf: [256]u8 = undefined;
-    const stdin = std.fs.File.stdin();
+    const stdin = fs_compat.File.stdin();
     const bytes_read = stdin.read(buf[0..]) catch {
         print("⏹️  Installation cancelled.\n", .{});
         return;
@@ -496,7 +507,7 @@ pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, s
             const cmd_parts = try buildCommand(allocator, system_info, .install, &[_][]const u8{pkg_name});
             defer allocator.free(cmd_parts);
 
-            var child = std.process.Child.init(cmd_parts, allocator);
+            var child = fs_compat.Child.init(cmd_parts, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             const term = child.spawnAndWait() catch |err| {
@@ -515,11 +526,11 @@ pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, s
     }
 }
 
-fn searchNativePackages(allocator: Allocator, system_info: SystemInfo, search_term: []const u8) !SearchResult {
+pub fn searchNativePackages(allocator: Allocator, system_info: SystemInfo, search_term: []const u8) !SearchResult {
     const cmd_parts = try buildCommand(allocator, system_info, .search, &[_][]const u8{search_term});
     defer allocator.free(cmd_parts);
 
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = cmd_parts,
         .max_output_bytes = 50 * 1024 * 1024,
@@ -545,7 +556,7 @@ fn searchNativePackages(allocator: Allocator, system_info: SystemInfo, search_te
 }
 
 fn parseYayOutput(allocator: Allocator, output: []const u8) !SearchResult {
-    var packages = ArrayList(PackageMatch){};
+    var packages = ArrayList(PackageMatch){ .items = &.{}, .capacity = 0 };
     var lines = std.mem.splitSequence(u8, output, "\n");
 
     while (lines.next()) |line| {
@@ -564,9 +575,8 @@ fn parseYayOutput(allocator: Allocator, output: []const u8) !SearchResult {
             const slash_pos = std.mem.indexOf(u8, trimmed, "/") orelse continue;
             const space_pos = std.mem.indexOf(u8, trimmed[slash_pos + 1 ..], " ") orelse (trimmed.len - slash_pos - 1);
 
-            const repo = trimmed[0..slash_pos];
             const pkg_name = trimmed[slash_pos + 1 .. slash_pos + 1 + space_pos];
-            const full_name = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ repo, pkg_name });
+            const full_name = try allocator.dupe(u8, trimmed);
 
             // Get description from next line if available
             var description: []const u8 = "";
@@ -606,8 +616,35 @@ fn parseYayOutput(allocator: Allocator, output: []const u8) !SearchResult {
     };
 }
 
+pub fn parseSelectionIndices(allocator: Allocator, input: []const u8, count: usize) ![]usize {
+    var selected = ArrayList(usize){ .items = &.{}, .capacity = 0 };
+
+    if (std.mem.startsWith(u8, input, "^")) {
+        var excluded = try parseIndices(allocator, input[1..], count);
+        defer excluded.deinit(allocator);
+
+        var i: usize = 1;
+        while (i <= count) : (i += 1) {
+            var skip = false;
+            for (excluded.items) |excluded_idx| {
+                if (i == excluded_idx) {
+                    skip = true;
+                    break;
+                }
+            }
+            if (!skip) try selected.append(allocator, i);
+        }
+    } else {
+        var indices = try parseIndices(allocator, input, count);
+        defer indices.deinit(allocator);
+        for (indices.items) |idx| try selected.append(allocator, idx);
+    }
+
+    return selected.toOwnedSlice(allocator);
+}
+
 fn parseSelection(allocator: Allocator, input: []const u8, packages: []PackageMatch) !ArrayList([]const u8) {
-    var selected = ArrayList([]const u8){};
+    var selected = ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
 
     // Handle "^" prefix (invert selection)
     if (std.mem.startsWith(u8, input, "^")) {
@@ -644,7 +681,7 @@ fn parseSelection(allocator: Allocator, input: []const u8, packages: []PackageMa
 }
 
 fn parseIndices(allocator: Allocator, input: []const u8, max_packages: usize) !ArrayList(usize) {
-    var indices = ArrayList(usize){};
+    var indices = ArrayList(usize){ .items = &.{}, .capacity = 0 };
     var parts = std.mem.splitSequence(u8, input, " ");
 
     while (parts.next()) |part| {
@@ -696,7 +733,7 @@ pub const PrunablePackage = struct {
 /// force-overwrite flag and — if so — offer an interactive retry.
 /// Handles the common "conflicting files already exist in filesystem" error
 /// that occurs when files were installed outside of the package manager.
-fn retryInstallWithOverwrite(allocator: Allocator, system_info: SystemInfo, pkg_name: []const u8) !void {
+pub fn retryInstallWithOverwrite(allocator: Allocator, system_info: SystemInfo, pkg_name: []const u8) !void {
     // Build the overwrite variant per package manager family.
     // Returns null when the PM has no meaningful overwrite flag.
     const overwrite_extra: ?[]const []const u8 = switch (system_info.package_manager) {
@@ -718,7 +755,7 @@ fn retryInstallWithOverwrite(allocator: Allocator, system_info: SystemInfo, pkg_
     print("   Retry with --overwrite / force-install? [y/N] ", .{});
 
     var buf: [8]u8 = undefined;
-    const stdin = std.fs.File.stdin();
+    const stdin = fs_compat.File.stdin();
     const n = stdin.read(buf[0..]) catch return;
     const answer = std.mem.trim(u8, buf[0..n], " \t\r\n");
     if (answer.len == 0 or (answer[0] != 'y' and answer[0] != 'Y')) {
@@ -731,7 +768,7 @@ fn retryInstallWithOverwrite(allocator: Allocator, system_info: SystemInfo, pkg_
     defer allocator.free(base);
 
     // base ends with --noconfirm (or -y for apt); insert extra flags after that, then the package.
-    var retry_cmd = ArrayList([]const u8){};
+    var retry_cmd = ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
     defer retry_cmd.deinit(allocator);
     for (base) |arg| try retry_cmd.append(allocator, arg);
     for (extra) |arg| try retry_cmd.append(allocator, arg);
@@ -741,7 +778,7 @@ fn retryInstallWithOverwrite(allocator: Allocator, system_info: SystemInfo, pkg_
     for (retry_cmd.items) |arg| print("{s} ", .{arg});
     print("\n", .{});
 
-    var child = std.process.Child.init(retry_cmd.items, allocator);
+    var child = fs_compat.Child.init(retry_cmd.items, allocator);
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
     const term = child.spawnAndWait() catch |err| {
@@ -787,7 +824,7 @@ pub fn getPrunablePackages(allocator: Allocator, system_info: SystemInfo) !Array
         },
     }
 
-    const result = try std.process.Child.run(.{
+    const result = try fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = cmd_parts.items,
         .max_output_bytes = 10 * 1024 * 1024,
@@ -908,7 +945,7 @@ pub fn performPruneFlow(allocator: Allocator, system_info: SystemInfo) !void {
 
     print("\n🤔 Prune these packages? [y/N]: ", .{});
     var buf: [256]u8 = undefined;
-    const stdin = std.fs.File.stdin();
+    const stdin = fs_compat.File.stdin();
     const bytes_read = try stdin.read(buf[0..]);
     if (bytes_read > 0) {
         const input = std.mem.trim(u8, buf[0..bytes_read], " \t\r\n");
@@ -924,7 +961,7 @@ pub fn performPruneFlow(allocator: Allocator, system_info: SystemInfo) !void {
             const cmd_parts = try buildCommand(allocator, system_info, .remove, names.items);
             defer allocator.free(cmd_parts);
 
-            var child = std.process.Child.init(cmd_parts, allocator);
+            var child = fs_compat.Child.init(cmd_parts, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = try child.spawnAndWait();
@@ -953,7 +990,7 @@ pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []c
 
             // Clean leftover temporary download directories from interrupted pacman downloads
             print("  • Removing stale pacman download directories...\n", .{});
-            var clean_dl = std.process.Child.init(&[_][]const u8{ "sudo", "sh", "-c", "rm -rf /var/cache/pacman/pkg/download-*" }, allocator);
+            var clean_dl = fs_compat.Child.init(&[_][]const u8{ "sudo", "sh", "-c", "rm -rf /var/cache/pacman/pkg/download-*" }, allocator);
             clean_dl.stdout_behavior = .Ignore;
             clean_dl.stderr_behavior = .Ignore;
             _ = clean_dl.spawnAndWait() catch {};
@@ -966,7 +1003,7 @@ pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []c
             try pacman_cmd.append(allocator, clean_flag);
             try pacman_cmd.append(allocator, "--noconfirm");
 
-            var child = std.process.Child.init(pacman_cmd.items, allocator);
+            var child = fs_compat.Child.init(pacman_cmd.items, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean pacman cache: {}\n", .{err});
@@ -981,7 +1018,7 @@ pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []c
                 try aur_cmd.append(allocator, clean_flag);
                 try aur_cmd.append(allocator, "--noconfirm");
 
-                var aur_child = std.process.Child.init(aur_cmd.items, allocator);
+                var aur_child = fs_compat.Child.init(aur_cmd.items, allocator);
                 aur_child.stdout_behavior = .Inherit;
                 aur_child.stderr_behavior = .Inherit;
                 const term = aur_child.spawnAndWait() catch |err| {
@@ -1002,14 +1039,14 @@ pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []c
         },
         .apt => {
             print("  • Running sudo apt clean...\n", .{});
-            var child = std.process.Child.init(&[_][]const u8{ "sudo", "apt", "clean" }, allocator);
+            var child = fs_compat.Child.init(&[_][]const u8{ "sudo", "apt", "clean" }, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean apt cache: {}\n", .{err});
 
             if (aggressive) {
                 print("  • Running sudo apt autoremove...\n", .{});
-                var auto_child = std.process.Child.init(&[_][]const u8{ "sudo", "apt", "autoremove", "-y" }, allocator);
+                var auto_child = fs_compat.Child.init(&[_][]const u8{ "sudo", "apt", "autoremove", "-y" }, allocator);
                 auto_child.stdout_behavior = .Inherit;
                 auto_child.stderr_behavior = .Inherit;
                 _ = auto_child.spawnAndWait() catch |err| print("⚠️ Failed apt autoremove: {}\n", .{err});
@@ -1017,14 +1054,14 @@ pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []c
         },
         .dnf => {
             print("  • Running sudo dnf clean all...\n", .{});
-            var child = std.process.Child.init(&[_][]const u8{ "sudo", "dnf", "clean", "all" }, allocator);
+            var child = fs_compat.Child.init(&[_][]const u8{ "sudo", "dnf", "clean", "all" }, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean dnf cache: {}\n", .{err});
         },
         .zypper => {
             print("  • Running sudo zypper clean --all...\n", .{});
-            var child = std.process.Child.init(&[_][]const u8{ "sudo", "zypper", "clean", "--all" }, allocator);
+            var child = fs_compat.Child.init(&[_][]const u8{ "sudo", "zypper", "clean", "--all" }, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean zypper cache: {}\n", .{err});
@@ -1032,13 +1069,13 @@ pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []c
         .nix => {
             if (aggressive) {
                 print("  • Running nix-collect-garbage -d...\n", .{});
-                var child = std.process.Child.init(&[_][]const u8{ "nix-collect-garbage", "-d" }, allocator);
+                var child = fs_compat.Child.init(&[_][]const u8{ "nix-collect-garbage", "-d" }, allocator);
                 child.stdout_behavior = .Inherit;
                 child.stderr_behavior = .Inherit;
                 _ = child.spawnAndWait() catch |err| print("⚠️ Failed to collect nix garbage: {}\n", .{err});
             } else {
                 print("  • Running nix-collect-garbage...\n", .{});
-                var child = std.process.Child.init(&[_][]const u8{"nix-collect-garbage"}, allocator);
+                var child = fs_compat.Child.init(&[_][]const u8{"nix-collect-garbage"}, allocator);
                 child.stdout_behavior = .Inherit;
                 child.stderr_behavior = .Inherit;
                 _ = child.spawnAndWait() catch |err| print("⚠️ Failed to collect nix garbage: {}\n", .{err});
@@ -1051,7 +1088,7 @@ pub fn performCleanFlow(allocator: Allocator, system_info: SystemInfo, args: []c
     for (system_info.package_sources) |source| {
         if (source == .flatpak) {
             print("  • Cleaning unused Flatpak runtimes...\n", .{});
-            var child = std.process.Child.init(&[_][]const u8{ "flatpak", "uninstall", "--unused", "-y" }, allocator);
+            var child = fs_compat.Child.init(&[_][]const u8{ "flatpak", "uninstall", "--unused", "-y" }, allocator);
             child.stdout_behavior = .Inherit;
             child.stderr_behavior = .Inherit;
             _ = child.spawnAndWait() catch |err| print("⚠️ Failed to clean flatpak unused packages: {}\n", .{err});

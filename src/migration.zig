@@ -2,6 +2,7 @@ const std = @import("std");
 const print = std.debug.print;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
+const fs_compat = @import("fs_compat.zig");
 
 pub const MigrationStats = struct {
     files_copied: u64,
@@ -19,13 +20,13 @@ pub const MigrationStats = struct {
             .dirs_skipped = 0,
             .errors = 0,
             .bytes_copied = 0,
-            .start_time = std.time.timestamp(),
+            .start_time = fs_compat.timestamp(),
             .end_time = 0,
         };
     }
 
     pub fn finish(self: *MigrationStats) void {
-        self.end_time = std.time.timestamp();
+        self.end_time = fs_compat.timestamp();
     }
 
     pub fn duration(self: *const MigrationStats) i64 {
@@ -184,14 +185,14 @@ pub const MigrationBackup = struct {
         }
 
         // Verify source exists
-        std.fs.cwd().access(self.options.source_path, .{}) catch |err| {
+        fs_compat.cwd().access(self.options.source_path, .{}) catch |err| {
             print("❌ Source directory does not exist: {s}\n", .{self.options.source_path});
             return err;
         };
 
         // Create destination directory if not dry run
         if (!self.options.dry_run) {
-            std.fs.cwd().makePath(self.options.dest_path) catch |err| {
+            fs_compat.cwd().makePath(self.options.dest_path) catch |err| {
                 print("❌ Failed to create destination directory: {s}\n", .{self.options.dest_path});
                 return err;
             };
@@ -215,7 +216,7 @@ pub const MigrationBackup = struct {
             return;
         }
 
-        var source_dir = std.fs.cwd().openDir(source, .{ .iterate = true }) catch |err| {
+        var source_dir = fs_compat.cwd().openDir(source, .{ .iterate = true }) catch |err| {
             if (self.options.verbose) {
                 print("⚠️  Cannot access directory: {s} ({})\n", .{ source, err });
             }
@@ -256,7 +257,7 @@ pub const MigrationBackup = struct {
                         continue;
                     } else {
                         if (!self.options.dry_run) {
-                            std.fs.cwd().makePath(dest_path) catch |err| {
+                            fs_compat.cwd().makePath(dest_path) catch |err| {
                                 if (self.options.verbose) {
                                     print("❌ Failed to create directory {s}: {}\n", .{ dest_path, err });
                                 }
@@ -271,7 +272,7 @@ pub const MigrationBackup = struct {
                     // Handle symlinks by preserving them
                     if (!self.options.dry_run) {
                         var link_buffer: [std.fs.max_path_bytes]u8 = undefined;
-                        const target_path = std.fs.cwd().readLink(source_path, &link_buffer) catch |err| {
+                        const target_path = fs_compat.cwd().readLink(source_path, &link_buffer) catch |err| {
                             if (self.options.verbose) {
                                 print("⚠️  Failed to read symlink {s}: {}\n", .{ source_path, err });
                             }
@@ -279,7 +280,7 @@ pub const MigrationBackup = struct {
                             continue;
                         };
 
-                        std.fs.cwd().symLink(target_path, dest_path, .{}) catch |err| {
+                        fs_compat.cwd().symLink(target_path, dest_path, .{}) catch |err| {
                             if (self.options.verbose) {
                                 print("⚠️  Failed to create symlink {s}: {}\n", .{ dest_path, err });
                             }
@@ -310,7 +311,7 @@ pub const MigrationBackup = struct {
             return;
         }
 
-        const source_file = std.fs.cwd().openFile(source, .{}) catch |err| {
+        const source_file = fs_compat.cwd().openFile(source, .{}) catch |err| {
             if (self.options.verbose) {
                 print("❌ Failed to open source file {s}: {}\n", .{ source, err });
             }
@@ -324,7 +325,7 @@ pub const MigrationBackup = struct {
 
         // Create destination directory if needed
         if (std.fs.path.dirname(dest)) |dest_dir| {
-            std.fs.cwd().makePath(dest_dir) catch |err| {
+            fs_compat.cwd().makePath(dest_dir) catch |err| {
                 if (self.options.verbose) {
                     print("❌ Failed to create destination directory {s}: {}\n", .{ dest_dir, err });
                 }
@@ -333,7 +334,7 @@ pub const MigrationBackup = struct {
             };
         }
 
-        const dest_file = std.fs.cwd().createFile(dest, .{}) catch |err| {
+        const dest_file = fs_compat.cwd().createFile(dest, .{}) catch |err| {
             if (self.options.verbose) {
                 print("❌ Failed to create destination file {s}: {}\n", .{ dest, err });
             }
@@ -512,7 +513,7 @@ pub const MigrationBackup = struct {
         const gitignore_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dir_path, ".gitignore" });
         defer self.allocator.free(gitignore_path);
 
-        const gitignore_file = std.fs.cwd().openFile(gitignore_path, .{}) catch {
+        const gitignore_file = fs_compat.cwd().openFile(gitignore_path, .{}) catch {
             // No .gitignore file, cache empty patterns
             const owned_path = try self.allocator.dupe(u8, dir_path);
             try self.gitignore_cache.put(owned_path, patterns);
@@ -550,7 +551,7 @@ pub const MigrationBackup = struct {
     // Fast check for massive directories without full traversal
     fn isMassiveDirectory(self: *MigrationBackup, dir_path: []const u8) bool {
         _ = self;
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return false;
+        var dir = fs_compat.cwd().openDir(dir_path, .{ .iterate = true }) catch return false;
         defer dir.close();
 
         var count: u32 = 0;
@@ -570,7 +571,7 @@ pub const MigrationBackup = struct {
     fn countFilesInDirectory(self: *MigrationBackup, dir_path: []const u8) !u64 {
         _ = self;
         var count: u64 = 0;
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return 0;
+        var dir = fs_compat.cwd().openDir(dir_path, .{ .iterate = true }) catch return 0;
         defer dir.close();
 
         var iterator = dir.iterate();
@@ -609,7 +610,7 @@ pub const MigrationBackup = struct {
         const info_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.options.dest_path, "backup_info.json" });
         defer self.allocator.free(info_path);
 
-        const info_file = std.fs.cwd().createFile(info_path, .{}) catch {
+        const info_file = fs_compat.cwd().createFile(info_path, .{}) catch {
             if (self.options.verbose) {
                 print("⚠️  Could not create backup info file\n", .{});
             }
@@ -714,7 +715,7 @@ pub fn runMigrationBackup(allocator: Allocator, args: []const []const u8) !void 
 
     if (!dest_set) {
         // Generate default destination path
-        const timestamp = std.time.timestamp();
+        const timestamp = fs_compat.timestamp();
         const dest_name = try std.fmt.allocPrint(allocator, "migration-backup-{}", .{timestamp});
         defer allocator.free(dest_name);
         options.dest_path = dest_name;

@@ -3,6 +3,7 @@ const print = std.debug.print;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const system = @import("system.zig");
+const fs_compat = @import("../fs_compat.zig");
 const SystemInfo = system.SystemInfo;
 
 pub const PackageProfile = struct {
@@ -48,7 +49,7 @@ pub fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config
     }
 
     // Get current timestamp
-    const timestamp = std.time.timestamp();
+    const timestamp = fs_compat.timestamp();
     const timestamp_str = try std.fmt.allocPrint(allocator, "{d}", .{timestamp});
     defer allocator.free(timestamp_str);
 
@@ -184,7 +185,7 @@ pub fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config
     try json_parts.append(allocator, try allocator.dupe(u8, "\n}\n"));
 
     // Write to file
-    const file = try std.fs.cwd().createFile(profile_name, .{});
+    const file = try fs_compat.cwd().createFile(profile_name, .{});
     defer file.close();
 
     for (json_parts.items) |part| {
@@ -205,7 +206,7 @@ pub fn exportProfile(allocator: Allocator, filename: ?[]const u8, include_config
 }
 
 fn getKernelVersion(allocator: Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ "uname", "-r" },
     }) catch return try allocator.dupe(u8, "unknown");
@@ -222,7 +223,7 @@ fn getKernelVersion(allocator: Allocator) ![]const u8 {
 }
 
 fn getArchitecture(allocator: Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ "uname", "-m" },
     }) catch return try allocator.dupe(u8, "unknown");
@@ -251,7 +252,7 @@ fn getNativePackages(allocator: Allocator, package_manager: system.PackageManage
         .unknown => return packages.toOwnedSlice(allocator),
     };
 
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = cmd,
     }) catch return packages.toOwnedSlice(allocator);
@@ -308,7 +309,7 @@ fn getFlatpakPackages(allocator: Allocator) ![][]const u8 {
         return packages.toOwnedSlice(allocator);
     }
 
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ "flatpak", "list", "--app", "--columns=application" },
     }) catch return packages.toOwnedSlice(allocator);
@@ -342,12 +343,12 @@ fn getAppImagePackages(allocator: Allocator) ![][]const u8 {
 
     for (appimage_dirs) |dir_path| {
         const expanded_path = if (std.mem.startsWith(u8, dir_path, "~/"))
-            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ std.posix.getenv("HOME") orelse "/home/unknown", dir_path[2..] })
+            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ fs_compat.getenv("HOME") orelse "/home/unknown", dir_path[2..] })
         else
             try allocator.dupe(u8, dir_path);
         defer allocator.free(expanded_path);
 
-        var dir = std.fs.cwd().openDir(expanded_path, .{ .iterate = true }) catch continue;
+        var dir = fs_compat.cwd().openDir(expanded_path, .{ .iterate = true }) catch continue;
         defer dir.close();
 
         var iterator = dir.iterate();
@@ -372,7 +373,7 @@ fn getVersionManagerPackages(allocator: Allocator, vm: system.VersionManager) ![
         else => return packages.toOwnedSlice(allocator),
     };
 
-    const result = std.process.Child.run(.{
+    const result = fs_compat.Child.run(.{
         .allocator = allocator,
         .argv = cmd,
     }) catch return packages.toOwnedSlice(allocator);
@@ -396,9 +397,9 @@ fn getVersionManagerPackages(allocator: Allocator, vm: system.VersionManager) ![
 fn getDotfiles(allocator: Allocator) ![][]const u8 {
     var dotfiles = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
 
-    const home_dir = std.posix.getenv("HOME") orelse return dotfiles.toOwnedSlice(allocator);
+    const home_dir = fs_compat.getenv("HOME") orelse return dotfiles.toOwnedSlice(allocator);
 
-    var dir = std.fs.cwd().openDir(home_dir, .{ .iterate = true }) catch return dotfiles.toOwnedSlice(allocator);
+    var dir = fs_compat.cwd().openDir(home_dir, .{ .iterate = true }) catch return dotfiles.toOwnedSlice(allocator);
     defer dir.close();
 
     var iterator = dir.iterate();

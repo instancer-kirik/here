@@ -88,7 +88,7 @@ pub const AppImageInstaller = struct {
     install_dir: []const u8,
 
     pub fn init(allocator: Allocator) !AppImageInstaller {
-        const home_dir = std.posix.getenv("HOME") orelse return AppImageError.FileSystemError;
+        const home_dir = fs_compat.getenv("HOME") orelse return AppImageError.FileSystemError;
         const install_dir = try std.fmt.allocPrint(allocator, "{s}/.local/bin", .{home_dir});
 
         return AppImageInstaller{
@@ -158,7 +158,7 @@ pub const AppImageInstaller = struct {
         const url = try std.fmt.allocPrint(self.allocator, "https://api.github.com/repos/{s}/releases/latest", .{repo});
         defer self.allocator.free(url);
 
-        const curl_result = std.process.Child.run(.{
+        const curl_result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "curl", "-s", "-f", "-H", "Accept: application/vnd.github+json", "-H", "X-GitHub-Api-Version: 2022-11-28", url },
         }) catch return AppImageError.NetworkError;
@@ -213,7 +213,7 @@ pub const AppImageInstaller = struct {
     }
 
     fn downloadFile(self: *AppImageInstaller, url: []const u8, destination: []const u8) !void {
-        const curl_result = std.process.Child.run(.{
+        const curl_result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "curl", "-L", "-f", "-o", destination, "--progress-bar", url },
         }) catch return AppImageError.DownloadError;
@@ -228,7 +228,7 @@ pub const AppImageInstaller = struct {
     }
 
     fn makeExecutable(self: *AppImageInstaller, file_path: []const u8) !void {
-        const chmod_result = std.process.Child.run(.{
+        const chmod_result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "chmod", "+x", file_path },
         }) catch return AppImageError.FileSystemError;
@@ -242,7 +242,7 @@ pub const AppImageInstaller = struct {
     }
 
     fn checkPath(self: *AppImageInstaller) void {
-        const path_env = std.posix.getenv("PATH") orelse "";
+        const path_env = fs_compat.getenv("PATH") orelse "";
 
         if (std.mem.indexOf(u8, path_env, self.install_dir) == null) {
             print("⚠️  Warning: {s} is not in your PATH\n", .{self.install_dir});
@@ -254,7 +254,7 @@ pub const AppImageInstaller = struct {
     pub fn searchAppImageHub(self: *AppImageInstaller, package_name: []const u8) !void {
         print("🧊 Searching AppImageHub for '{s}'...\n", .{package_name});
 
-        const curl_result = std.process.Child.run(.{
+        const curl_result = fs_compat.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "curl", "-s", "-f", "https://appimage.github.io/feed.json" },
         }) catch {
@@ -356,9 +356,7 @@ pub const AppImageInstaller = struct {
                 const file_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.install_dir, entry.name });
                 defer self.allocator.free(file_path);
 
-                const stat = std.posix.fstat(
-                    std.posix.openat(std.posix.AT.FDCWD, file_path, .{ .ACCMODE = .RDONLY }, 0) catch continue,
-                ) catch continue;
+                const stat = fs_compat.statPath(file_path) catch continue;
                 const is_executable = (stat.mode & 0o111) != 0;
 
                 if (is_executable) {
