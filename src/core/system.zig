@@ -16,6 +16,7 @@ pub const PackageSource = enum {
     flatpak,
     appimage,
     snap,
+    github,
 
     pub fn toString(self: PackageSource) []const u8 {
         return switch (self) {
@@ -23,6 +24,7 @@ pub const PackageSource = enum {
             .flatpak => "flatpak",
             .appimage => "appimage",
             .snap => "snap",
+            .github => "github",
         };
     }
 };
@@ -203,6 +205,9 @@ pub fn detectPackageSources(allocator: Allocator) ![]const PackageSource {
 
     // AppImage support is always available (no system dependency)
     try sources.append(allocator, .appimage);
+
+    // Tagged install.sh entries. The catalog is local; the download happens on install.
+    try sources.append(allocator, .github);
 
     return sources.toOwnedSlice(allocator);
 }

@@ -4,6 +4,8 @@ const build_options = @import("build_options");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const appimage = @import("appimage.zig");
+const github_release = @import("github_release.zig");
+const aur_owner = @import("aur_owner.zig");
 const appman = @import("appman_integration.zig");
 const migration = @import("migration.zig");
 const recovery = @import("recovery.zig");
@@ -818,13 +820,25 @@ fn selectAndInstall(allocator: Allocator, system_info: SystemInfo, query: []cons
         matches.deinit(allocator);
     }
 
-    if (system_info.package_manager == .yay or system_info.package_manager == .paru or system_info.package_manager == .pacman) {
-        const native = packages.searchNativePackages(allocator, system_info, query) catch packages.SearchResult{ .packages = &.{}, .total_count = 0 };
-        if (native.packages.len > 0) {
-            defer allocator.free(native.packages);
-            for (native.packages) |pkg| matches.append(allocator, pkg) catch {};
-        }
-    }
+    const native_argv: ?[]const []const u8 = if (system_info.package_manager == .yay or system_info.package_manager == .paru or system_info.package_manager == .pacman)
+        packages.buildCommand(allocator, system_info, .search, &[_][]const u8{query}) catch null
+    else
+        null;
+    defer if (native_argv) |argv| allocator.free(argv);
+
+    const flatpak_argv = [_][]const u8{ "flatpak", "search", "--columns=name,description,application,version,remotes", query };
+    const want_flatpak = hasSource(system_info, .flatpak);
+
+    var native_out = CommandOutput{};
+    var flatpak_out = CommandOutput{};
+    const native_thread = if (native_argv) |argv| std.Thread.spawn(.{}, captureCommand, .{ argv, &native_out }) catch null else null;
+    const flatpak_thread = if (want_flatpak) std.Thread.spawn(.{}, captureCommand, .{ flatpak_argv[0..], &flatpak_out }) catch null else null;
+    var github_job = GitHubJob{ .query = query };
+    const github_thread = if (hasSource(system_info, .github))
+        std.Thread.spawn(.{}, runGitHubJob, .{&github_job}) catch null
+    else
+        null;
+    if (github_thread == null and hasSource(system_info, .github)) runGitHubJob(&github_job);
 
     if (hasSource(system_info, .appimage)) {
         var appman_manager = appman.AppManManager.init(allocator) catch null;
@@ -856,11 +870,31 @@ fn selectAndInstall(allocator: Allocator, system_info: SystemInfo, query: []cons
         }
     }
 
-    if (hasSource(system_info, .flatpak)) {
-        collectFlatpakMatches(allocator, query, &matches) catch {};
+    if (native_thread) |thread| thread.join() else if (native_argv) |argv| captureCommand(argv, &native_out);
+    if (flatpak_thread) |thread| thread.join() else if (want_flatpak) captureCommand(flatpak_argv[0..], &flatpak_out);
+    if (github_thread) |thread| thread.join();
+    defer native_out.deinit();
+    defer flatpak_out.deinit();
+
+    if (native_out.ok) {
+        const native = packages.parseNativeSearchOutput(allocator, native_out.stdout) catch packages.SearchResult{ .packages = &.{}, .total_count = 0 };
+        if (native.packages.len > 0) {
+            defer allocator.free(native.packages);
+            for (native.packages) |pkg| matches.append(allocator, pkg) catch {};
+        }
+    }
+    if (flatpak_out.ok) appendFlatpakSearch(allocator, flatpak_out.stdout, &matches) catch {};
+
+    if (github_job.hits) |hits| {
+        defer {
+            for (hits) |*hit| hit.deinit();
+            std.heap.page_allocator.free(hits);
+        }
+        appendGitHubHits(allocator, hits, &matches);
     }
 
     annotateInstallState(allocator, &matches);
+    annotateAurOwners(allocator, &matches);
 
     if (matches.items.len == 0) {
         print("\n❌ No packages found for '{s}'\n", .{query});
@@ -869,9 +903,10 @@ fn selectAndInstall(allocator: Allocator, system_info: SystemInfo, query: []cons
 
     // Flatpak, then AppImage, then native. Native stays in yay's order, so the
     // closest match is last and prints as 1, the same way yay numbers a menu.
+    // GitHub is first here so it prints at the high end, as a last-effort fallback.
     var ordered = ArrayList(packages.PackageMatch){ .items = &.{}, .capacity = 0 };
     defer ordered.deinit(allocator);
-    const source_order = [_]PackageSource{ .flatpak, .appimage, .native, .snap };
+    const source_order = [_]PackageSource{ .github, .flatpak, .appimage, .native, .snap };
     for (source_order) |source| {
         for (matches.items) |pkg| {
             if (pkg.source == source) ordered.append(allocator, pkg) catch {};
@@ -956,6 +991,15 @@ fn installMatch(allocator: Allocator, system_info: SystemInfo, pkg: packages.Pac
             }
         },
         .snap => print("❌ Snap install from this menu is not supported for {s}\n", .{pkg.name}),
+        .github => {
+            const selected = github_release.parseSelection(withoutInstalledNote(pkg.id)) orelse {
+                print("❌ GitHub row for {s} has no owner and tag\n", .{pkg.name});
+                return;
+            };
+            github_release.install(allocator, selected.repo, selected.tag) catch |err| {
+                print("❌ GitHub release install failed for {s}: {}\n", .{ selected.repo, err });
+            };
+        },
     }
 }
 
@@ -996,6 +1040,7 @@ fn annotateInstallState(allocator: Allocator, matches: *ArrayList(packages.Packa
             .flatpak => if (flatpaks) |map| installedNote(allocator, pkg.id, map.get(pkg.name)) catch null else null,
             .appimage => if (appImageInstalled(pkg.name)) allocator.dupe(u8, " (Installed)") catch null else null,
             .snap => null,
+            .github => githubInstalledNote(allocator, pkg.name, rowVersion(pkg.id)),
         };
         const suffix = note orelse continue;
         defer allocator.free(suffix);
@@ -1088,20 +1133,29 @@ fn loadNativeInstalls(allocator: Allocator, matches: []const packages.PackageMat
     const info = runCapture(allocator, argv.items) orelse return map;
     defer allocator.free(info);
 
+    // `Installed From` is printed before `Name`, so hold it until the name arrives.
     var current_name: ?[]const u8 = null;
+    var pending_origin: ?[]const u8 = null;
     var info_lines = std.mem.splitScalar(u8, info, '\n');
     while (info_lines.next()) |line| {
-        const name = fieldValue(line, "Name") orelse null;
-        if (name) |pkg_name| {
-            current_name = pkg_name;
+        if (std.mem.trim(u8, line, " \t\r").len == 0) {
+            current_name = null;
+            pending_origin = null;
             continue;
         }
-        const origin = fieldValue(line, "Installed From") orelse continue;
-        const key = current_name orelse continue;
-        if (map.getPtr(key)) |entry| {
-            if (!std.mem.eql(u8, origin, "None")) {
-                allocator.free(entry.origin);
-                entry.origin = allocator.dupe(u8, origin) catch entry.origin;
+        if (fieldValue(line, "Name")) |pkg_name| {
+            current_name = pkg_name;
+            if (pending_origin) |origin| {
+                setInstallOrigin(allocator, &map, pkg_name, origin);
+                pending_origin = null;
+            }
+            continue;
+        }
+        if (fieldValue(line, "Installed From")) |origin| {
+            if (current_name) |pkg_name| {
+                setInstallOrigin(allocator, &map, pkg_name, origin);
+            } else {
+                pending_origin = origin;
             }
         }
     }
@@ -1128,6 +1182,14 @@ fn loadFlatpakInstalls(allocator: Allocator) !std.StringHashMap(LocalInstall) {
         });
     }
     return map;
+}
+
+fn setInstallOrigin(allocator: Allocator, map: *std.StringHashMap(LocalInstall), name: []const u8, origin: []const u8) void {
+    if (std.mem.eql(u8, origin, "None")) return;
+    const entry = map.getPtr(name) orelse return;
+    const owned = allocator.dupe(u8, origin) catch return;
+    allocator.free(entry.origin);
+    entry.origin = owned;
 }
 
 fn menuWantsNative(matches: []const packages.PackageMatch, name: []const u8) bool {
@@ -1165,21 +1227,61 @@ fn runCapture(allocator: Allocator, argv: []const []const u8) ?[]u8 {
     return result.stdout;
 }
 
-fn collectFlatpakMatches(allocator: Allocator, query: []const u8, matches: *ArrayList(packages.PackageMatch)) !void {
-    const result = fs_compat.Child.run(.{
-        .allocator = allocator,
-        .argv = &[_][]const u8{ "flatpak", "search", "--columns=name,description,application,version,remotes", query },
-        .max_output_bytes = 1024 * 1024,
-    }) catch return;
-
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
-    switch (result.term) {
-        .Exited => |code| if (code != 0) return,
-        else => return,
+/// Run a command with stdio inherited. Prints the argv and a failure line.
+/// Success is left to the caller so a multi-step update can report once.
+fn runReportedCommand(allocator: Allocator, argv: []const []const u8) bool {
+    print("🚀 Running: ", .{});
+    for (argv, 0..) |part, i| {
+        if (i > 0) print(" ", .{});
+        print("{s}", .{part});
     }
+    print("\n", .{});
 
-    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    var child = fs_compat.Child.init(argv, allocator);
+    const term = child.spawnAndWait() catch |err| {
+        print("❌ Failed to execute command: {}\n", .{err});
+        return false;
+    };
+    switch (term) {
+        .Exited => |code| {
+            if (code == 0) return true;
+            print("❌ Command failed with exit code: {}\n", .{code});
+            return false;
+        },
+        else => {
+            print("❌ Command terminated unexpectedly\n", .{});
+            return false;
+        },
+    }
+}
+
+const CommandOutput = struct {
+    stdout: []u8 = &.{},
+    stderr: []u8 = &.{},
+    ok: bool = false,
+
+    fn deinit(self: @This()) void {
+        const page = std.heap.page_allocator;
+        if (self.stdout.len > 0) page.free(self.stdout);
+        if (self.stderr.len > 0) page.free(self.stderr);
+    }
+};
+
+fn captureCommand(argv: []const []const u8, dest: *CommandOutput) void {
+    const result = fs_compat.Child.run(.{
+        .allocator = std.heap.page_allocator,
+        .argv = argv,
+    }) catch return;
+    dest.stdout = result.stdout;
+    dest.stderr = result.stderr;
+    dest.ok = switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    };
+}
+
+fn appendFlatpakSearch(allocator: Allocator, stdout: []const u8, matches: *ArrayList(packages.PackageMatch)) !void {
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         var parts = std.mem.splitScalar(u8, line, '\t');
@@ -1201,6 +1303,88 @@ fn collectFlatpakMatches(allocator: Allocator, query: []const u8, matches: *Arra
         });
         _ = display_name;
     }
+}
+
+const GitHubJob = struct {
+    query: []const u8,
+    hits: ?[]github_release.Hit = null,
+};
+
+fn runGitHubJob(job: *GitHubJob) void {
+    job.hits = github_release.search(std.heap.page_allocator, job.query) catch null;
+}
+
+fn appendGitHubHits(allocator: Allocator, hits: []github_release.Hit, matches: *ArrayList(packages.PackageMatch)) void {
+    for (hits) |hit| {
+        const id = if (hit.changed_from) |previous|
+            std.fmt.allocPrint(allocator, "github/{s}/{s} {s} (owner changed: {s} -> {s})", .{ hit.owner, hit.name, hit.tag, previous, hit.owner }) catch continue
+        else
+            std.fmt.allocPrint(allocator, "github/{s}/{s} {s}", .{ hit.owner, hit.name, hit.tag }) catch continue;
+        const description = allocator.dupe(u8, hit.description) catch {
+            allocator.free(id);
+            continue;
+        };
+        const name = allocator.dupe(u8, hit.name) catch {
+            allocator.free(id);
+            allocator.free(description);
+            continue;
+        };
+        matches.append(allocator, .{
+            .name = name,
+            .source = .github,
+            .id = id,
+            .description = description,
+        }) catch {
+            allocator.free(name);
+            allocator.free(id);
+            allocator.free(description);
+        };
+    }
+}
+
+fn annotateAurOwners(allocator: Allocator, matches: *ArrayList(packages.PackageMatch)) void {
+    var names = ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
+    defer names.deinit(allocator);
+    for (matches.items) |pkg| {
+        if (pkg.source != .native) continue;
+        if (!std.mem.eql(u8, rowRepo(pkg.id), "aur")) continue;
+        names.append(allocator, pkg.name) catch return;
+    }
+    if (names.items.len == 0) return;
+
+    const infos = aur_owner.lookup(allocator, names.items) catch return;
+    defer {
+        for (infos) |*info| info.deinit();
+        allocator.free(infos);
+    }
+
+    for (matches.items) |*pkg| {
+        if (pkg.source != .native or !std.mem.eql(u8, rowRepo(pkg.id), "aur")) continue;
+        const info = aurInfoFor(infos, pkg.name) orelse continue;
+        const installed = std.mem.indexOf(u8, pkg.id, "(Installed") != null;
+        const note = aur_owner.suffix(allocator, pkg.name, info.maintainer, installed) catch continue;
+        defer allocator.free(note);
+        if (std.mem.eql(u8, note, " (Orphaned)") and std.mem.indexOf(u8, pkg.id, "(Orphaned)") != null) continue;
+        const updated = std.fmt.allocPrint(allocator, "{s}{s}", .{ pkg.id, note }) catch continue;
+        allocator.free(pkg.id);
+        pkg.id = updated;
+    }
+}
+
+fn aurInfoFor(infos: []aur_owner.Info, name: []const u8) ?aur_owner.Info {
+    for (infos) |info| {
+        if (std.mem.eql(u8, info.name, name)) return info;
+    }
+    return null;
+}
+
+fn githubInstalledNote(allocator: Allocator, name: []const u8, offered: []const u8) ?[]const u8 {
+    const installed = github_release.installedTag(allocator, name) orelse return null;
+    defer allocator.free(installed);
+    if (offered.len > 0 and std.mem.eql(u8, offered, installed)) {
+        return allocator.dupe(u8, " (Installed)") catch null;
+    }
+    return std.fmt.allocPrint(allocator, " (Installed: {s})", .{installed}) catch null;
 }
 
 fn installFromAlternateSources(allocator: Allocator, system_info: SystemInfo, package_name: []const u8) bool {
@@ -1256,6 +1440,24 @@ fn searchAllSources(allocator: Allocator, system_info: SystemInfo, query: []cons
     if (hasSource(system_info, .flatpak)) {
         print("\n", .{});
         searchFlatpak(allocator, query) catch {};
+    }
+    if (hasSource(system_info, .github)) {
+        const hits = github_release.search(allocator, query) catch null;
+        if (hits) |found| {
+            defer {
+                for (found) |*hit| hit.deinit();
+                allocator.free(found);
+            }
+            if (found.len > 0) print("\n🐙 GitHub release scripts:\n", .{});
+            for (found) |hit| {
+                if (hit.changed_from) |previous| {
+                    print("  github/{s}/{s} {s} (owner changed: {s} -> {s})\n", .{ hit.owner, hit.name, hit.tag, previous, hit.owner });
+                } else {
+                    print("  github/{s}/{s} {s}\n", .{ hit.owner, hit.name, hit.tag });
+                }
+                if (hit.description.len > 0) print("    {s}\n", .{hit.description});
+            }
+        }
     }
 }
 
@@ -1878,6 +2080,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (system_info.package_manager == .unknown) {
         print("❌ No supported package manager found for this operation\n", .{});
         return;
+    }
+
+    // apt upgrade uses the on-disk index. Refresh it first, or `here update`
+    // installs nothing and stops after "N packages can be upgraded".
+    if (command == .update and system_info.package_manager == .apt) {
+        const refresh = [_][]const u8{ "sudo", "apt", "update" };
+        if (!runReportedCommand(allocator, &refresh)) return;
     }
 
     const cmd_parts = packages.buildCommand(allocator, system_info, command, package_args) catch |err| {

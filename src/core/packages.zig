@@ -127,7 +127,12 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                     try cmd_parts.append(allocator, "-y");
                 },
                 .update => {
-                    try cmd_parts.append(allocator, "update");
+                    // `apt update` only refreshes indexes, prints
+                    // "N packages can be upgraded", and exits. The install
+                    // is `apt upgrade`. Callers on apt must refresh first
+                    // (see main) so this is not a no-op against a stale cache.
+                    try cmd_parts.append(allocator, "upgrade");
+                    try cmd_parts.append(allocator, "-y");
                 },
                 .list => try cmd_parts.append(allocator, "list --installed"),
                 .info => try cmd_parts.append(allocator, "show"),
@@ -526,6 +531,10 @@ pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, s
     }
 }
 
+pub fn parseNativeSearchOutput(allocator: Allocator, output: []const u8) !SearchResult {
+    return parseYayOutput(allocator, output);
+}
+
 pub fn searchNativePackages(allocator: Allocator, system_info: SystemInfo, search_term: []const u8) !SearchResult {
     const cmd_parts = try buildCommand(allocator, system_info, .search, &[_][]const u8{search_term});
     defer allocator.free(cmd_parts);
@@ -555,58 +564,87 @@ pub fn searchNativePackages(allocator: Allocator, system_info: SystemInfo, searc
     return parseYayOutput(allocator, result.stdout);
 }
 
-fn parseYayOutput(allocator: Allocator, output: []const u8) !SearchResult {
-    var packages = ArrayList(PackageMatch){ .items = &.{}, .capacity = 0 };
-    var lines = std.mem.splitSequence(u8, output, "\n");
+fn isRepoToken(text: []const u8) bool {
+    if (text.len == 0) return false;
+    for (text) |c| {
+        const ok = std.ascii.isAlphanumeric(c) or c == '+' or c == '_' or c == '.' or c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
 
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \t\r\n");
-        if (trimmed.len == 0) continue;
+/// A result header is `repo/name version...`, including repos such as
+/// `cachyos-extra-v3`. Descriptions stay descriptions even when they contain `/`.
+fn isPackageHeader(line: []const u8) bool {
+    if (line.len == 0 or line[0] == ' ' or line[0] == '\t') return false;
+    const token_end = std.mem.indexOfScalar(u8, line, ' ') orelse return false;
+    const token = line[0..token_end];
+    const slash = std.mem.indexOfScalar(u8, token, '/') orelse return false;
+    if (slash == 0 or slash + 1 >= token.len) return false;
+    if (std.mem.indexOfScalar(u8, token[slash + 1 ..], '/') != null) return false;
+    if (!isRepoToken(token[0..slash]) or !isRepoToken(token[slash + 1 ..])) return false;
+    // The next field is a version (`1.6.9-1`, `1:1.6.9-1`, `62e0b4a-1`).
+    // That keeps a description such as `PipeWire/WirePlumber configuration...` a description.
+    const version_start = token_end + 1;
+    if (version_start >= line.len) return false;
+    const version_end = std.mem.indexOfScalarPos(u8, line, version_start, ' ') orelse line.len;
+    const version = line[version_start..version_end];
+    return std.mem.indexOfAny(u8, version, "0123456789") != null;
+}
 
-        // Parse yay output format: "repo/package-name version (votes popularity)"
-        // Only match lines that start with known repository prefixes to avoid false matches
-        if (std.mem.startsWith(u8, trimmed, "aur/") or std.mem.startsWith(u8, trimmed, "extra/") or
-            std.mem.startsWith(u8, trimmed, "core/") or std.mem.startsWith(u8, trimmed, "community/") or
-            std.mem.startsWith(u8, trimmed, "multilib/") or std.mem.startsWith(u8, trimmed, "cachyos/") or
-            std.mem.startsWith(u8, trimmed, "chaotic-aur/"))
-        {
-
-            // Extract package name
-            const slash_pos = std.mem.indexOf(u8, trimmed, "/") orelse continue;
-            const space_pos = std.mem.indexOf(u8, trimmed[slash_pos + 1 ..], " ") orelse (trimmed.len - slash_pos - 1);
-
-            const pkg_name = trimmed[slash_pos + 1 .. slash_pos + 1 + space_pos];
-            const full_name = try allocator.dupe(u8, trimmed);
-
-            // Get description from next line if available
-            var description: []const u8 = "";
-            if (lines.next()) |desc_line| {
-                const desc_trimmed = std.mem.trim(u8, desc_line, " \t\r\n");
-                if (desc_trimmed.len > 0 and !std.mem.startsWith(u8, desc_trimmed, "aur/") and
-                    !std.mem.startsWith(u8, desc_trimmed, "extra/") and !std.mem.startsWith(u8, desc_trimmed, "core/") and
-                    !std.mem.startsWith(u8, desc_trimmed, "community/") and !std.mem.startsWith(u8, desc_trimmed, "multilib/") and
-                    !std.mem.startsWith(u8, desc_trimmed, "cachyos/") and !std.mem.startsWith(u8, desc_trimmed, "chaotic-aur/") and
-                    std.mem.indexOf(u8, desc_trimmed, "/") == null)
-                {
-                    description = try allocator.dupe(u8, desc_trimmed);
-                } else {
-                    // Put the line back by creating a new iterator from remaining content
-                    const remaining = desc_line;
-                    lines = std.mem.splitSequence(u8, remaining, "\n");
-                }
-            }
-
-            if (description.len == 0) {
-                description = try allocator.dupe(u8, "");
-            }
-
-            try packages.append(allocator, PackageMatch{
-                .name = try allocator.dupe(u8, pkg_name),
-                .source = .native,
-                .id = full_name,
-                .description = description,
-            });
+fn stripAnsi(allocator: Allocator, text: []const u8) ![]u8 {
+    var out = ArrayList(u8){ .items = &.{}, .capacity = 0 };
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == 0x1b and i + 1 < text.len and text[i + 1] == '[') {
+            i += 2;
+            while (i < text.len and text[i] != 'm') : (i += 1) {}
+            if (i < text.len) i += 1;
+            continue;
         }
+        try out.append(allocator, text[i]);
+        i += 1;
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn parseYayOutput(allocator: Allocator, output: []const u8) !SearchResult {
+    const plain = try stripAnsi(allocator, output);
+    defer allocator.free(plain);
+
+    var lines = ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
+    defer lines.deinit(allocator);
+    var raw = std.mem.splitScalar(u8, plain, '\n');
+    while (raw.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+        try lines.append(allocator, trimmed);
+    }
+
+    var packages = ArrayList(PackageMatch){ .items = &.{}, .capacity = 0 };
+    var i: usize = 0;
+    while (i < lines.items.len) : (i += 1) {
+        const header = lines.items[i];
+        if (!isPackageHeader(header)) continue;
+
+        const slash_pos = std.mem.indexOfScalar(u8, header, '/') orelse continue;
+        const name_end = std.mem.indexOfScalarPos(u8, header, slash_pos + 1, ' ') orelse continue;
+        const pkg_name = header[slash_pos + 1 .. name_end];
+
+        var description: []const u8 = "";
+        if (i + 1 < lines.items.len and !isPackageHeader(lines.items[i + 1])) {
+            description = try allocator.dupe(u8, lines.items[i + 1]);
+            i += 1;
+        } else {
+            description = try allocator.dupe(u8, "");
+        }
+
+        try packages.append(allocator, PackageMatch{
+            .name = try allocator.dupe(u8, pkg_name),
+            .source = .native,
+            .id = try allocator.dupe(u8, header),
+            .description = description,
+        });
     }
 
     const result_packages = try packages.toOwnedSlice(allocator);
