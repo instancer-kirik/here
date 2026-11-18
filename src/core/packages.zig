@@ -121,7 +121,14 @@ pub fn buildCommand(allocator: Allocator, system_info: SystemInfo, command: Comm
                     try cmd_parts.append(allocator, "install");
                     try cmd_parts.append(allocator, "-y");
                 },
-                .search => try cmd_parts.append(allocator, "search"),
+                .search => {
+                    // `apt search` is not a stable interface and the menu
+                    // captures stdout, where `sudo` would wait on a password
+                    // and then fail. `apt-cache search` needs no root.
+                    cmd_parts.clearRetainingCapacity();
+                    try cmd_parts.append(allocator, "apt-cache");
+                    try cmd_parts.append(allocator, "search");
+                },
                 .remove => {
                     try cmd_parts.append(allocator, "remove");
                     try cmd_parts.append(allocator, "-y");
@@ -531,8 +538,76 @@ pub fn performInteractiveSearch(allocator: Allocator, system_info: SystemInfo, s
     }
 }
 
-pub fn parseNativeSearchOutput(allocator: Allocator, output: []const u8) !SearchResult {
-    return parseYayOutput(allocator, output);
+pub fn parseNativeSearchOutput(allocator: Allocator, manager: PackageManager, query: []const u8, output: []const u8) !SearchResult {
+    return switch (manager) {
+        .apt => parseAptCacheOutput(allocator, query, output),
+        else => parseYayOutput(allocator, output),
+    };
+}
+
+fn isAptPackageName(name: []const u8) bool {
+    if (name.len == 0) return false;
+    for (name) |c| {
+        const ok = std.ascii.isAlphanumeric(c) or c == '+' or c == '-' or c == '.' or c == ':';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+/// `apt-cache search` prints `name - description`, one package per line.
+/// Name matches are kept after the rest so the menu's reversed numbering
+/// offers them as 1, the same way yay puts the closest match last.
+fn parseAptCacheOutput(allocator: Allocator, query: []const u8, output: []const u8) !SearchResult {
+    var packages = ArrayList(PackageMatch){ .items = &.{}, .capacity = 0 };
+    errdefer {
+        for (packages.items) |pkg| {
+            allocator.free(pkg.name);
+            allocator.free(pkg.id);
+            allocator.free(pkg.description);
+        }
+        packages.deinit(allocator);
+    }
+
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        const sep = std.mem.indexOf(u8, line, " - ") orelse continue;
+        const name = line[0..sep];
+        if (!isAptPackageName(name)) continue;
+        const description = std.mem.trim(u8, line[sep + 3 ..], " ");
+        try packages.append(allocator, PackageMatch{
+            .name = try allocator.dupe(u8, name),
+            .source = .native,
+            .id = try std.fmt.allocPrint(allocator, "apt/{s}", .{name}),
+            .description = try allocator.dupe(u8, description),
+        });
+    }
+
+    // Name matches last, so the menu (printed in reverse) offers them as 1.
+    if (query.len > 0 and packages.items.len > 1) {
+        const copy = try allocator.alloc(PackageMatch, packages.items.len);
+        defer allocator.free(copy);
+        @memcpy(copy, packages.items);
+        var write: usize = 0;
+        for (copy) |pkg| {
+            if (std.ascii.indexOfIgnoreCase(pkg.name, query) == null) {
+                packages.items[write] = pkg;
+                write += 1;
+            }
+        }
+        for (copy) |pkg| {
+            if (std.ascii.indexOfIgnoreCase(pkg.name, query) != null) {
+                packages.items[write] = pkg;
+                write += 1;
+            }
+        }
+    }
+
+    const result_packages = try packages.toOwnedSlice(allocator);
+    return SearchResult{
+        .packages = result_packages,
+        .total_count = result_packages.len,
+    };
 }
 
 pub fn searchNativePackages(allocator: Allocator, system_info: SystemInfo, search_term: []const u8) !SearchResult {

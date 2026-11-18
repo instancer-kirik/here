@@ -820,10 +820,10 @@ fn selectAndInstall(allocator: Allocator, system_info: SystemInfo, query: []cons
         matches.deinit(allocator);
     }
 
-    const native_argv: ?[]const []const u8 = if (system_info.package_manager == .yay or system_info.package_manager == .paru or system_info.package_manager == .pacman)
-        packages.buildCommand(allocator, system_info, .search, &[_][]const u8{query}) catch null
-    else
-        null;
+    const native_argv: ?[]const []const u8 = switch (system_info.package_manager) {
+        .yay, .paru, .pacman, .apt => packages.buildCommand(allocator, system_info, .search, &[_][]const u8{query}) catch null,
+        else => null,
+    };
     defer if (native_argv) |argv| allocator.free(argv);
 
     const flatpak_argv = [_][]const u8{ "flatpak", "search", "--columns=name,description,application,version,remotes", query };
@@ -877,7 +877,7 @@ fn selectAndInstall(allocator: Allocator, system_info: SystemInfo, query: []cons
     defer flatpak_out.deinit();
 
     if (native_out.ok) {
-        const native = packages.parseNativeSearchOutput(allocator, native_out.stdout) catch packages.SearchResult{ .packages = &.{}, .total_count = 0 };
+        const native = packages.parseNativeSearchOutput(allocator, system_info.package_manager, query, native_out.stdout) catch packages.SearchResult{ .packages = &.{}, .total_count = 0 };
         if (native.packages.len > 0) {
             defer allocator.free(native.packages);
             for (native.packages) |pkg| matches.append(allocator, pkg) catch {};

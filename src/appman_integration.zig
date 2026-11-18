@@ -161,20 +161,12 @@ pub const AppManManager = struct {
         print("💡 You may need to restart your shell or run: source ~/.bashrc\n", .{});
     }
 
-    /// Read the local AppMan catalog without invoking the CLI.
+    /// Read the AppMan catalog without invoking the CLI.
     /// Lines look like: `◆ openshot : A powerful Video Editor.`
+    /// The list lives at `~/.local/share/AM/<arch>-apps`. A machine that has
+    /// never run AppMan has no file, so fetch the upstream list once and cache it.
     pub fn searchCatalog(self: *AppManManager, query: []const u8) ![]AppInfo {
-        const home_dir = fs_compat.getenv("HOME") orelse return AppManError.DatabaseError;
-        const arch_file = switch (@import("builtin").cpu.arch) {
-            .aarch64 => "aarch64-apps",
-            else => "x86_64-apps",
-        };
-        const path = try std.fmt.allocPrint(self.allocator, "{s}/.local/share/AM/{s}", .{ home_dir, arch_file });
-        defer self.allocator.free(path);
-
-        const data = fs_compat.readFileAlloc(self.allocator, path, 8 * 1024 * 1024) catch {
-            return try self.allocator.alloc(AppInfo, 0);
-        };
+        const data = try self.loadCatalog();
         defer self.allocator.free(data);
 
         var results = ArrayList(AppInfo){ .items = &.{}, .capacity = 0 };
@@ -201,6 +193,50 @@ pub const AppManManager = struct {
         }
 
         return results.toOwnedSlice(self.allocator);
+    }
+
+    fn catalogArchFile() []const u8 {
+        return switch (@import("builtin").cpu.arch) {
+            .aarch64 => "aarch64-apps",
+            .x86 => "i686-apps",
+            else => "x86_64-apps",
+        };
+    }
+
+    fn loadCatalog(self: *AppManManager) ![]u8 {
+        const home_dir = fs_compat.getenv("HOME") orelse return AppManError.DatabaseError;
+        const arch_file = catalogArchFile();
+        const path = try std.fmt.allocPrint(self.allocator, "{s}/.local/share/AM/{s}", .{ home_dir, arch_file });
+        defer self.allocator.free(path);
+
+        if (fs_compat.readFileAlloc(self.allocator, path, 8 * 1024 * 1024) catch null) |cached| {
+            if (std.mem.indexOf(u8, cached, "◆") != null) return cached;
+            self.allocator.free(cached);
+        }
+
+        const url = try std.fmt.allocPrint(self.allocator, "https://raw.githubusercontent.com/ivan-hc/AM/main/programs/{s}", .{arch_file});
+        defer self.allocator.free(url);
+
+        const fetched = fs_compat.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "curl", "-fsSL", url },
+            .max_output_bytes = 8 * 1024 * 1024,
+        }) catch return self.allocator.alloc(u8, 0);
+        defer self.allocator.free(fetched.stderr);
+        const fetched_ok = switch (fetched.term) {
+            .Exited => |code| code == 0 and std.mem.indexOf(u8, fetched.stdout, "◆") != null,
+            else => false,
+        };
+        if (!fetched_ok) {
+            self.allocator.free(fetched.stdout);
+            return self.allocator.alloc(u8, 0);
+        }
+
+        if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| {
+            fs_compat.cwd().makePath(path[0..slash]) catch {};
+        }
+        fs_compat.writeFileAll(path, fetched.stdout) catch {};
+        return fetched.stdout;
     }
 
     /// Search for applications in AppMan database
