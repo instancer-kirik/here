@@ -746,7 +746,7 @@ fn restorePodmanConfig() !void {
         const target_path = try std.fmt.bufPrint(target_path_buf[0..], ".config/containers/{s}", .{config});
 
         if (!fs_compat.copyFileSpawn(std.heap.page_allocator, backup_path, target_path)) {
-                print("⚠️  Could not restore {s}\n", .{config});
+            print("⚠️  Could not restore {s}\n", .{config});
             continue;
         }
 

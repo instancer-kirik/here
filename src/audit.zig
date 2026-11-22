@@ -969,8 +969,8 @@ const ECOSYSTEM_AUDITORS = [_]EcosystemAuditSpec{
 /// Zero subprocess forks – just stat() calls.
 fn commandExistsOnPath(cmd: []const u8) bool {
     const path_dirs = [_][]const u8{
-        "/usr/bin", "/usr/local/bin", "/bin",
-        "/usr/sbin", "/snap/bin", "/home/linuxbrew/.linuxbrew/bin",
+        "/usr/bin",  "/usr/local/bin", "/bin",
+        "/usr/sbin", "/snap/bin",      "/home/linuxbrew/.linuxbrew/bin",
     };
     var buf: [512]u8 = undefined;
     for (path_dirs) |dir| {
@@ -1004,11 +1004,9 @@ fn runEcosystemAuditors(allocator: Allocator, project_dir: []const u8, run_tools
         if (!run_tools) {
             // Fast path: just tell the user what's available
             if (tool_present) {
-                print("💡 {s} detected – run `here audit --deep` to execute {s}\n",
-                    .{ spec.label, spec.tool });
+                print("💡 {s} detected – run `here audit --deep` to execute {s}\n", .{ spec.label, spec.tool });
             } else {
-                print("💡 {s} detected – install '{s}' for advisory checks\n",
-                    .{ spec.label, spec.tool });
+                print("💡 {s} detected – install '{s}' for advisory checks\n", .{ spec.label, spec.tool });
             }
             continue;
         }
@@ -1217,7 +1215,11 @@ pub fn runAudit(allocator: Allocator, args: []const []const u8) !void {
     const has_cargo = blk: {
         const ct = std.fs.path.join(allocator, &.{ search_root, "Cargo.toml" }) catch break :blk false;
         defer allocator.free(ct);
-        if (fs_compat.cwd().access(ct, .{})) { break :blk true; } else |_| { break :blk false; }
+        if (fs_compat.cwd().access(ct, .{})) {
+            break :blk true;
+        } else |_| {
+            break :blk false;
+        }
     };
     if (has_cargo) {
         const bfindings = scanCargoBuildScripts(allocator, search_root) catch |err| blk: {

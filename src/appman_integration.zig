@@ -429,14 +429,14 @@ pub const AppManManager = struct {
         }
     }
 
-fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
-    if (needle.len == 0 or haystack.len < needle.len) return false;
-    var i: usize = 0;
-    while (i + needle.len <= haystack.len) : (i += 1) {
-        if (std.ascii.eqlIgnoreCase(haystack[i..][0..needle.len], needle)) return true;
+    fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+        if (needle.len == 0 or haystack.len < needle.len) return false;
+        var i: usize = 0;
+        while (i + needle.len <= haystack.len) : (i += 1) {
+            if (std.ascii.eqlIgnoreCase(haystack[i..][0..needle.len], needle)) return true;
+        }
+        return false;
     }
-    return false;
-}
 
     /// Private helper functions
     fn parseSearchResults(self: *AppManManager, output: []const u8) ![]AppInfo {

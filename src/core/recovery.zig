@@ -27,12 +27,12 @@ pub const RecoveryAction = struct {
 
 pub fn analyzeFailure(allocator: Allocator, system_info: SystemInfo, stdout: []const u8, stderr: []const u8) !?RecoveryAction {
     _ = system_info; // May be used later for PM-specific parsing
-    const combined_output = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{stdout, stderr});
+    const combined_output = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ stdout, stderr });
     defer allocator.free(combined_output);
 
     if (std.mem.indexOf(u8, combined_output, "One or more files did not pass the validity check") != null or
-        (std.mem.indexOf(u8, combined_output, "FAILED") != null and std.mem.indexOf(u8, combined_output, "sha256sums") != null)) {
-        
+        (std.mem.indexOf(u8, combined_output, "FAILED") != null and std.mem.indexOf(u8, combined_output, "sha256sums") != null))
+    {
         return RecoveryAction{
             .action_type = .skip_checksums,
             .packages_to_install = &[_][]const u8{},
@@ -41,15 +41,15 @@ pub fn analyzeFailure(allocator: Allocator, system_info: SystemInfo, stdout: []c
     }
 
     if (std.mem.indexOf(u8, combined_output, "Missing dependencies:") != null or
-        std.mem.indexOf(u8, combined_output, "Could not resolve all dependencies") != null) {
-        
+        std.mem.indexOf(u8, combined_output, "Could not resolve all dependencies") != null)
+    {
         var missing_deps = ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
-        
+
         var lines = std.mem.splitScalar(u8, combined_output, '\n');
         var in_missing = false;
         while (lines.next()) |line| {
             const trimmed = std.mem.trim(u8, line, " \t\r\n");
-            
+
             if (std.mem.startsWith(u8, trimmed, "Missing dependencies:")) {
                 in_missing = true;
                 continue;
@@ -78,7 +78,8 @@ pub fn analyzeFailure(allocator: Allocator, system_info: SystemInfo, stdout: []c
     }
 
     if (std.mem.indexOf(u8, combined_output, "A failure occurred in build()") != null or
-        std.mem.indexOf(u8, combined_output, "A failure occurred in prepare()") != null) {
+        std.mem.indexOf(u8, combined_output, "A failure occurred in prepare()") != null)
+    {
         return RecoveryAction{
             .action_type = .manual_intervention,
             .packages_to_install = &[_][]const u8{},
