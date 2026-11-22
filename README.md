@@ -60,14 +60,14 @@ here import my-system.json
 curl -fsSL https://instance.select/here | bash
 ```
 Lmk if this doesn't work... 
-built with 0.15.2 zig on asdf
+built with 0.16.0 zig on asdf
 
 That's it! Clean, simple, and works everywhere. No package manager needed.
 
 ### Alternative Methods
 - **Manual binaries**: Download from [Codeberg Releases](https://codeberg.org/OverHereEnterprise/here/releases)
 - **AppImage**: Portable Linux binary that runs anywhere
-- **Build from source**: Requires Zig 0.15.0+
+- **Build from source**: Requires Zig 0.16.0+
 
 See [INSTALL.md](./INSTALL.md) for detailed installation options.
 

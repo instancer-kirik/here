@@ -1754,7 +1754,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     if (command == .version) {
-        cli.showVersion();
+        printVersion();
         return;
     }
 

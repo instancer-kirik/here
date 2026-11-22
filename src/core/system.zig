@@ -163,6 +163,22 @@ pub const Distro = enum {
     }
 };
 
+/// Maps an /etc/os-release `ID` (or `ID_LIKE` entry) to a known Distro.
+/// Used both for the primary `ID=` field and as a fallback over `ID_LIKE=`,
+/// so Arch/Debian/Ubuntu derivatives (CachyOS, EndeavourOS, Manjaro, Garuda,
+/// Linux Mint, Pop!_OS, Armbian-based boards, etc.) resolve to a real distro
+/// and get a working package manager instead of `.unknown`.
+fn distroFromId(id: []const u8) ?Distro {
+    if (std.mem.eql(u8, id, "arch")) return .arch;
+    if (std.mem.eql(u8, id, "debian")) return .debian;
+    if (std.mem.eql(u8, id, "ubuntu")) return .ubuntu;
+    if (std.mem.eql(u8, id, "armbian")) return .armbian;
+    if (std.mem.eql(u8, id, "opensuse") or std.mem.eql(u8, id, "opensuse-tumbleweed") or std.mem.eql(u8, id, "opensuse-leap")) return .opensuse;
+    if (std.mem.eql(u8, id, "fedora")) return .fedora;
+    if (std.mem.eql(u8, id, "nixos")) return .nixos;
+    return null;
+}
+
 pub const PackageManager = enum {
     yay,
     paru,
@@ -238,26 +254,29 @@ pub fn detectSystem(allocator: Allocator) !SystemInfo {
         defer allocator.free(contents);
 
         var distro: Distro = .unknown;
+        var id_like: []const u8 = "";
         var lines = std.mem.splitScalar(u8, contents, '\n');
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "ID=")) {
                 const id = std.mem.trim(u8, line[3..], "\"");
-                if (std.mem.eql(u8, id, "arch")) {
-                    distro = .arch;
-                } else if (std.mem.eql(u8, id, "debian")) {
-                    distro = .debian;
-                } else if (std.mem.eql(u8, id, "ubuntu")) {
-                    distro = .ubuntu;
-                } else if (std.mem.eql(u8, id, "armbian")) {
-                    distro = .armbian;
-                } else if (std.mem.eql(u8, id, "opensuse") or std.mem.eql(u8, id, "opensuse-tumbleweed") or std.mem.eql(u8, id, "opensuse-leap")) {
-                    distro = .opensuse;
-                } else if (std.mem.eql(u8, id, "fedora")) {
-                    distro = .fedora;
-                } else if (std.mem.eql(u8, id, "nixos")) {
-                    distro = .nixos;
+                distro = distroFromId(id) orelse .unknown;
+            } else if (std.mem.startsWith(u8, line, "ID_LIKE=")) {
+                id_like = std.mem.trim(u8, line["ID_LIKE=".len..], "\"");
+            }
+        }
+
+        // Derivatives (CachyOS, EndeavourOS, Manjaro, Garuda, Linux Mint, Pop!_OS,
+        // etc.) set their own ID but declare their base distro via ID_LIKE, which
+        // can list multiple space-separated values (e.g. "ubuntu debian" or just
+        // "arch"). Fall back to the first ID_LIKE entry we recognize so these
+        // still get a working package manager instead of landing on .unknown.
+        if (distro == .unknown and id_like.len > 0) {
+            var like_iter = std.mem.splitScalar(u8, id_like, ' ');
+            while (like_iter.next()) |like_id| {
+                if (distroFromId(like_id)) |matched| {
+                    distro = matched;
+                    break;
                 }
-                break;
             }
         }
 

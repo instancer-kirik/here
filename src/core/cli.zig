@@ -93,12 +93,6 @@ pub fn showHelp() void {
     print("For more information, visit: https://codeberg.org/OverHereEnterprise/here\n", .{});
 }
 
-pub fn showVersion() void {
-    print("here version 1.1.0\n", .{});
-    print("Universal package manager with system recovery and migration\n", .{});
-    print("Built with Zig 0.15.2\n", .{});
-}
-
 pub fn showUnknownCommand(command: []const u8) void {
     print("❌ Unknown command: {s}\n", .{command});
     showHelp();

@@ -1,7 +1,7 @@
 const std = @import("std");
 
 // Version information
-const version = "1.1.0";
+const version = "1.2.0";
 const description = "Universal package manager with system recovery and migration";
 const author = "here contributors";
 const license = "MIT";

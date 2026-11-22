@@ -16,6 +16,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Planned: Improved error messages and user feedback
 
+## [1.2.0] - 2026-11-21
+
+### Added
+- **Flatpak short-name aliases** - Installing a package via Flatpak now links a
+  short, memorable command (e.g. `bitwig-studio`) into `~/.local/bin`, read
+  from the app's exported `--command=` where available, falling back to the
+  lowercased last segment of the reverse-DNS app ID. Never clobbers an
+  existing command of the same name.
+- **Universal `here update`** - `update` now also refreshes Flatpak
+  (`flatpak update -y`) and AppImage/AppMan sources after the native package
+  manager, instead of only ever touching the native package manager.
+- **Arch-derivative distro detection via `ID_LIKE`** - Distros that set their
+  own `ID` but declare a base distro via `/etc/os-release`'s `ID_LIKE` (e.g.
+  CachyOS, EndeavourOS, Manjaro, Garuda, Linux Mint, Pop!_OS) are now
+  correctly resolved to that base distro instead of reporting "Unknown" and
+  losing native package manager support.
+
+### Fixed
+- **`here version`** reported a hardcoded, stale version/Zig string instead of
+  the real build metadata; it now reports the actual build-time version via
+  `build_options`.
+- Bumped minimum/required Zig version to 0.16.0 to match what the project
+  actually builds against (`.tool-versions`, `build.zig.zon`, README).
+
 ## [1.1.0] - 2025-12-30
 
 ### Added
