@@ -33,7 +33,6 @@ jobs:
     needs: test
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             target: x86_64-linux
@@ -62,22 +61,13 @@ jobs:
     - name: Prepare artifact
       run: |
         mkdir -p dist
-        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-          cp zig-out/release/${{ matrix.target }}/here dist/${{ matrix.artifact }}
-        else
-          # For macOS, we need to handle both architectures
-          for target in x86_64-macos aarch64-macos; do
-            if [ -f "zig-out/release/$target/here" ]; then
-              cp "zig-out/release/$target/here" "dist/here-macos-${target#*-}"
-            fi
-          done
-        fi
+        cp zig-out/release/${{ matrix.target }}/here dist/${{ matrix.artifact }}
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact }}
-        path: dist/here-*
+        path: dist/${{ matrix.artifact }}
         retention-days: 90
 
   release:
