@@ -755,7 +755,7 @@ fn printColoredMeta(meta: []const u8) void {
         if (meta[i] == '(' or meta[i] == '[') {
             const close: u8 = if (meta[i] == '(') ')' else ']';
             const end = std.mem.indexOfScalarPos(u8, meta, i, close) orelse meta.len - 1;
-            const group = meta[i .. @min(end + 1, meta.len)];
+            const group = meta[i..@min(end + 1, meta.len)];
             printColoredGroup(group);
             i = @min(end + 1, meta.len);
         } else {
@@ -1255,6 +1255,33 @@ fn runReportedCommand(allocator: Allocator, argv: []const []const u8) bool {
     }
 }
 
+// `here update` is supposed to be a universal update across every source
+// `here` manages, not just the native package manager. Flatpak and AppImage
+// (via AppMan) installs were previously invisible to `update` entirely, so
+// apps installed through those sources (e.g. Flatpak Bitwig Studio) would
+// silently never get refreshed by "here update".
+fn runFlatpakUpdate(allocator: Allocator, system_info: SystemInfo) void {
+    if (!hasSource(system_info, .flatpak)) return;
+
+    print("\n📦 Updating Flatpak packages...\n", .{});
+    const argv = [_][]const u8{ "flatpak", "update", "-y" };
+    _ = runReportedCommand(allocator, &argv);
+}
+
+fn runAppImageUpdate(allocator: Allocator, system_info: SystemInfo) void {
+    if (!hasSource(system_info, .appimage)) return;
+
+    var appman_manager = appman.AppManManager.init(allocator) catch return;
+    defer appman_manager.deinit();
+
+    if (!appman_manager.isAppManInstalled()) return;
+
+    print("\n🧊 Updating AppImage (AppMan) packages...\n", .{});
+    appman_manager.updateAll() catch |err| {
+        print("⚠️  AppMan update failed: {}\n", .{err});
+    };
+}
+
 const CommandOutput = struct {
     stdout: []u8 = &.{},
     stderr: []u8 = &.{},
@@ -1551,10 +1578,87 @@ fn installFlatpak(allocator: Allocator, package: []const u8) !bool {
     var child = fs_compat.Child.init(cmd_slice, allocator);
     const term = child.spawnAndWait() catch return false;
 
-    return switch (term) {
+    const ok = switch (term) {
         .Exited => |code| code == 0,
         else => false,
     };
+
+    // Flatpak only ever exports a binary named after the full reverse-DNS app
+    // ID (e.g. `com.bitwig.BitwigStudio`), never a short, memorable command.
+    // A "universal" package manager should make `flatpak`-sourced installs
+    // feel as native as everything else, so link a short alias into
+    // ~/.local/bin that forwards to `flatpak run`.
+    if (ok) createFlatpakAlias(allocator, package);
+
+    return ok;
+}
+
+/// Creates a short-named wrapper in ~/.local/bin for a Flatpak app ID, so
+/// e.g. `com.bitwig.BitwigStudio` becomes runnable as `bitwig-studio` from
+/// any terminal, matching what users expect from native package installs.
+fn createFlatpakAlias(allocator: Allocator, app_id: []const u8) void {
+    const home = fs_compat.getenv("HOME") orelse return;
+
+    const short_name = deriveFlatpakShortName(allocator, app_id) catch null orelse return;
+    defer allocator.free(short_name);
+    if (short_name.len == 0) return;
+
+    const bin_dir = std.fmt.allocPrint(allocator, "{s}/.local/bin", .{home}) catch return;
+    defer allocator.free(bin_dir);
+    fs_compat.cwd().makeDir(bin_dir) catch {};
+
+    const alias_path = std.fmt.allocPrint(allocator, "{s}/{s}", .{ bin_dir, short_name }) catch return;
+    defer allocator.free(alias_path);
+
+    // Don't clobber a pre-existing command/alias the user already has.
+    if (fs_compat.accessExists(alias_path)) return;
+
+    const script = std.fmt.allocPrint(allocator, "#!/bin/sh\nexec flatpak run {s} \"$@\"\n", .{app_id}) catch return;
+    defer allocator.free(script);
+
+    fs_compat.writeFileAll(alias_path, script) catch return;
+
+    const file = fs_compat.cwd().openFile(alias_path, .{}) catch return;
+    defer file.close();
+    file.chmod(0o755) catch {};
+
+    print("🔗 Linked `{s}` -> flatpak run {s} (in ~/.local/bin)\n", .{ short_name, app_id });
+}
+
+/// Finds the best short command name for a Flatpak app ID. Prefers the
+/// `--command=<name>` the app itself declares in its exported .desktop file
+/// (e.g. "bitwig-studio"), falling back to the last reverse-DNS segment,
+/// lowercased (e.g. "com.discordapp.Discord" -> "discord").
+fn deriveFlatpakShortName(allocator: Allocator, app_id: []const u8) !?[]const u8 {
+    const home = fs_compat.getenv("HOME") orelse "";
+
+    var candidates: [2][]const u8 = undefined;
+    var count: usize = 0;
+    if (home.len > 0) {
+        candidates[count] = try std.fmt.allocPrint(allocator, "{s}/.local/share/flatpak/exports/share/applications/{s}.desktop", .{ home, app_id });
+        count += 1;
+    }
+    candidates[count] = try std.fmt.allocPrint(allocator, "/var/lib/flatpak/exports/share/applications/{s}.desktop", .{app_id});
+    count += 1;
+    defer for (candidates[0..count]) |p| allocator.free(p);
+
+    for (candidates[0..count]) |desktop_path| {
+        const contents = fs_compat.readFileAlloc(allocator, desktop_path, 64 * 1024) catch continue;
+        defer allocator.free(contents);
+
+        if (std.mem.indexOf(u8, contents, "--command=")) |idx| {
+            const start = idx + "--command=".len;
+            var end = start;
+            while (end < contents.len and contents[end] != ' ' and contents[end] != '\n' and contents[end] != '\r') : (end += 1) {}
+            if (end > start) return try allocator.dupe(u8, contents[start..end]);
+        }
+    }
+
+    const last = if (std.mem.lastIndexOfScalar(u8, app_id, '.')) |idx| app_id[idx + 1 ..] else app_id;
+    if (last.len == 0) return null;
+    const lower = try allocator.alloc(u8, last.len);
+    for (last, 0..) |c, i| lower[i] = std.ascii.toLower(c);
+    return lower;
 }
 
 fn printVersion() void {
@@ -2076,17 +2180,38 @@ pub fn main(init: std.process.Init.Minimal) !void {
         return;
     }
 
+    // `here update` is the universal entry point: refresh the native package
+    // manager AND every other source `here` manages (Flatpak, AppImage/AppMan),
+    // so apps like a Flatpak-installed Bitwig Studio actually get updated.
+    if (command == .update) {
+        if (system_info.package_manager != .unknown) {
+            // apt upgrade uses the on-disk index. Refresh it first, or `here update`
+            // installs nothing and stops after "N packages can be upgraded".
+            if (system_info.package_manager == .apt) {
+                const refresh = [_][]const u8{ "sudo", "apt", "update" };
+                if (!runReportedCommand(allocator, &refresh)) return;
+            }
+
+            const cmd_parts = packages.buildCommand(allocator, system_info, command, package_args) catch |err| {
+                print("❌ Failed to build command: {}\n", .{err});
+                return;
+            };
+            defer allocator.free(cmd_parts);
+
+            _ = runReportedCommand(allocator, cmd_parts);
+        } else {
+            print("⚠️  No native package manager found; updating other sources only.\n", .{});
+        }
+
+        runFlatpakUpdate(allocator, system_info);
+        runAppImageUpdate(allocator, system_info);
+        return;
+    }
+
     // For other commands, use native package manager
     if (system_info.package_manager == .unknown) {
         print("❌ No supported package manager found for this operation\n", .{});
         return;
-    }
-
-    // apt upgrade uses the on-disk index. Refresh it first, or `here update`
-    // installs nothing and stops after "N packages can be upgraded".
-    if (command == .update and system_info.package_manager == .apt) {
-        const refresh = [_][]const u8{ "sudo", "apt", "update" };
-        if (!runReportedCommand(allocator, &refresh)) return;
     }
 
     const cmd_parts = packages.buildCommand(allocator, system_info, command, package_args) catch |err| {
